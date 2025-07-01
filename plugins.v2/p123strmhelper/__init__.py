@@ -475,6 +475,7 @@ class P123StrmHelper(_PluginBase):
     _clear_recyclebin_enabled = False
     _clear_receive_path_enabled = False
     _cron_clear = None
+    _account_pool_raw = None
 
     def init_plugin(self, config: dict = None):
         """
@@ -519,10 +520,9 @@ class P123StrmHelper(_PluginBase):
             self._clear_recyclebin_enabled = config.get("clear_recyclebin_enabled")
             self._clear_receive_path_enabled = config.get("clear_receive_path_enabled")
             self._cron_clear = config.get("cron_clear")
-            # 账号池解析
-            account_pool_str = config.get("account_pool", "")
+            self._account_pool_raw = config.get("account_pool", "")
             self._account_pool = []
-            for line in account_pool_str.strip().splitlines():
+            for line in self._account_pool_raw.strip().splitlines():
                 if "#" in line:
                     passport, password = line.split("#", 1)
                     self._account_pool.append({"passport": passport.strip(), "password": password.strip()})
@@ -908,7 +908,7 @@ class P123StrmHelper(_PluginBase):
             "moviepilot_address": "",
             "user_rmt_mediaext": "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v",
             "user_download_mediaext": "srt,ssa,ass",
-            "account_pool": account_pool_str,
+            "account_pool": self._account_pool_raw,
             # ... 其余默认配置 ...
         }
 
@@ -916,36 +916,38 @@ class P123StrmHelper(_PluginBase):
         pass
 
     def __update_config(self):
-        self.update_config(
-            {
-                "enabled": self._enabled,
-                "once_full_sync_strm": self._once_full_sync_strm,
-                "passport": self._passport,
-                "password": self._password,
-                "moviepilot_address": self.moviepilot_address,
-                "user_rmt_mediaext": self._user_rmt_mediaext,
-                "user_download_mediaext": self._user_download_mediaext,
-                "transfer_monitor_enabled": self._transfer_monitor_enabled,
-                "transfer_monitor_paths": self._transfer_monitor_paths,
-                "transfer_monitor_scrape_metadata_enabled": self._transfer_monitor_scrape_metadata_enabled,
-                "transfer_mp_mediaserver_paths": self._transfer_mp_mediaserver_paths,
-                "transfer_monitor_media_server_refresh_enabled": self._transfer_monitor_media_server_refresh_enabled,
-                "transfer_monitor_mediaservers": self._transfer_monitor_mediaservers,
-                "timing_full_sync_strm": self._timing_full_sync_strm,
-                "full_sync_auto_download_mediainfo_enabled": self._full_sync_auto_download_mediainfo_enabled,
-                "cron_full_sync_strm": self._cron_full_sync_strm,
-                "full_sync_strm_paths": self._full_sync_strm_paths,
-                "share_strm_enabled": self._share_strm_enabled,
-                "share_strm_auto_download_mediainfo_enabled": self._share_strm_auto_download_mediainfo_enabled,
-                "user_share_code": self._user_share_code,
-                "user_share_pwd": self._user_share_pwd,
-                "user_share_pan_path": self._user_share_pan_path,
-                "user_share_local_path": self._user_share_local_path,
-                "clear_recyclebin_enabled": self._clear_recyclebin_enabled,
-                "clear_receive_path_enabled": self._clear_receive_path_enabled,
-                "cron_clear": self._cron_clear,
-            }
-        )
+        account_pool_str = "\n".join([
+            f"{acc['passport']}#{acc['password']}" for acc in self._account_pool
+        ])
+        self._account_pool_raw = account_pool_str
+        self.update_config({
+            "enabled": self._enabled,
+            "once_full_sync_strm": self._once_full_sync_strm,
+            "passport": self._passport,
+            "password": self._password,
+            "moviepilot_address": self.moviepilot_address,
+            "user_rmt_mediaext": self._user_rmt_mediaext,
+            "user_download_mediaext": self._user_download_mediaext,
+            "transfer_monitor_enabled": self._transfer_monitor_enabled,
+            "transfer_monitor_paths": self._transfer_monitor_paths,
+            "transfer_monitor_scrape_metadata_enabled": self._transfer_monitor_scrape_metadata_enabled,
+            "transfer_mp_mediaserver_paths": self._transfer_mp_mediaserver_paths,
+            "transfer_monitor_media_server_refresh_enabled": self._transfer_monitor_media_server_refresh_enabled,
+            "transfer_monitor_mediaservers": self._transfer_monitor_mediaservers,
+            "timing_full_sync_strm": self._timing_full_sync_strm,
+            "full_sync_auto_download_mediainfo_enabled": self._full_sync_auto_download_mediainfo_enabled,
+            "cron_full_sync_strm": self._cron_full_sync_strm,
+            "full_sync_strm_paths": self._full_sync_strm_paths,
+            "share_strm_enabled": self._share_strm_enabled,
+            "share_strm_auto_download_mediainfo_enabled": self._share_strm_auto_download_mediainfo_enabled,
+            "user_share_code": self._user_share_code,
+            "user_share_pwd": self._user_share_pwd,
+            "user_share_pan_path": self._user_share_pan_path,
+            "user_share_local_path": self._user_share_local_path,
+            "clear_recyclebin_enabled": self._clear_recyclebin_enabled,
+            "clear_receive_path_enabled": self._clear_receive_path_enabled,
+            "cron_clear": self._cron_clear,
+        })
 
     @staticmethod
     def has_prefix(full_path, prefix_path):
