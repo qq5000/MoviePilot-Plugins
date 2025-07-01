@@ -30,6 +30,7 @@ from app.schemas.types import EventType, MediaType
 from app.utils.system import SystemUtils
 
 from .tool import P123AutoClient
+
 class MediaInfoDownloader:
     """
     媒体信息文件下载器
