@@ -430,7 +430,7 @@ class P123StrmHelper(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDS-Derek/MoviePilot-Plugins/main/icons/P123Disk.png"
     # 插件版本
-    plugin_version = "1.1.0"
+    plugin_version = "1.0.9"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -837,40 +837,50 @@ class P123StrmHelper(_PluginBase):
                 "content": [
                     {
                         "component": "VCol",
-                        "props": {"cols": 12},
+                        "props": {"cols": 12, "md": 3},
                         "content": [
                             {
-                                "component": "VTextarea",
+                                "component": "VSwitch",
                                 "props": {
                                     "model": "transfer_mp_mediaserver_paths",
                                     "label": "媒体服务器映射替换",
-                                    "rows": 2,
-                                    "placeholder": "一行一个，格式：媒体库服务器映射目录#MP映射目录\n例如：\n/media#/data",
-                                    "hint": "用于媒体服务器映射路径和MP映射路径不一样时自动刷新媒体服务器入库",
-                                    "persistent-hint": True,
                                 },
-                            },
-                            {
-                                "component": "VAlert",
-                                "props": {
-                                    "type": "info",
-                                    "variant": "tonal",
-                                    "density": "compact",
-                                    "class": "mt-2",
-                                },
-                                "content": [
-                                    {
-                                        "component": "div",
-                                        "text": "媒体服务器映射路径和MP映射路径不一样时请配置此项，如果不配置则无法正常刷新",
-                                    },
-                                    {
-                                        "component": "div",
-                                        "text": "当映射路径一样时可省略此配置",
-                                    },
-                                ],
-                            },
+                            }
                         ],
-                    }
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "transfer_monitor_media_server_refresh_enabled",
+                                    "label": "媒体服务器刷新",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VSelect",
+                                "props": {
+                                    "multiple": True,
+                                    "chips": True,
+                                    "clearable": True,
+                                    "model": "transfer_monitor_mediaservers",
+                                    "label": "媒体服务器",
+                                    "items": [
+                                        {"title": config.name, "value": config.name}
+                                        for config in _mediaserver_helper.get_configs().values()
+                                    ],
+                                },
+                            }
+                        ],
+                    },
                 ],
             },
         ]
@@ -1163,6 +1173,154 @@ class P123StrmHelper(_PluginBase):
             },
         ]
 
+        # 基础设置卡片内容
+        base_card_content = [
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "enabled",
+                                    "label": "启用插件",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "passport",
+                                    "label": "手机号",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "password",
+                                    "label": "密码",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "moviepilot_address",
+                                    "label": "MoviePilot 内网访问地址",
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "user_rmt_mediaext",
+                                    "label": "可整理媒体文件扩展名",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "user_download_mediaext",
+                                    "label": "可下载媒体数据文件扩展名",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]
+
+        # 账号池独立卡片
+        account_pool_card = {
+            "component": "VCard",
+            "props": {"variant": "outlined", "class": "mb-3"},
+            "content": [
+                {
+                    "component": "VCardTitle",
+                    "props": {"class": "d-flex align-center"},
+                    "content": [
+                        {
+                            "component": "VIcon",
+                            "props": {
+                                "icon": "mdi-account-switch",
+                                "color": "primary",
+                                "class": "mr-2",
+                            },
+                        },
+                        {"component": "span", "text": "账号池设置"},
+                    ],
+                },
+                {"component": "VDivider"},
+                {
+                    "component": "VCardText",
+                    "content": [
+                        {
+                            "component": "VRow",
+                            "content": [
+                                {
+                                    "component": "VCol",
+                                    "props": {"cols": 12},
+                                    "content": [
+                                        {
+                                            "component": "VTextarea",
+                                            "props": {
+                                                "model": "account_pool",
+                                                "label": "账号池（每行一个，格式：手机号#密码）",
+                                                "rows": 5,
+                                                "placeholder": "例如：\n13800000000#password1\n13900000000#password2",
+                                                "hint": "支持多个账号，自动轮换，每小时切换一次。",
+                                                "persistent-hint": True,
+                                            },
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ],
+        }
+
         return [
             {
                 "component": "VCard",
@@ -1184,106 +1342,10 @@ class P123StrmHelper(_PluginBase):
                         ],
                     },
                     {"component": "VDivider"},
-                    {
-                        "component": "VCardText",
-                        "content": [
-                            {
-                                "component": "VRow",
-                                "content": [
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12, "md": 3},
-                                        "content": [
-                                            {
-                                                "component": "VSwitch",
-                                                "props": {
-                                                    "model": "enabled",
-                                                    "label": "启用插件",
-                                                },
-                                            }
-                                        ],
-                                    },
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12, "md": 3},
-                                        "content": [
-                                            {
-                                                "component": "VTextField",
-                                                "props": {
-                                                    "model": "passport",
-                                                    "label": "手机号",
-                                                },
-                                            }
-                                        ],
-                                    },
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12, "md": 3},
-                                        "content": [
-                                            {
-                                                "component": "VTextField",
-                                                "props": {
-                                                    "model": "password",
-                                                    "label": "密码",
-                                                },
-                                            }
-                                        ],
-                                    },
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12, "md": 3},
-                                        "content": [
-                                            {
-                                                "component": "VTextField",
-                                                "props": {
-                                                    "model": "moviepilot_address",
-                                                    "label": "MoviePilot 内网访问地址",
-                                                },
-                                            }
-                                        ],
-                                    },
-                                ],
-                            },
-                            {
-                                "component": "VRow",
-                                "content": [
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12},
-                                        "content": [
-                                            {
-                                                "component": "VTextField",
-                                                "props": {
-                                                    "model": "user_rmt_mediaext",
-                                                    "label": "可整理媒体文件扩展名",
-                                                },
-                                            }
-                                        ],
-                                    }
-                                ],
-                            },
-                            {
-                                "component": "VRow",
-                                "content": [
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12},
-                                        "content": [
-                                            {
-                                                "component": "VTextField",
-                                                "props": {
-                                                    "model": "user_download_mediaext",
-                                                    "label": "可下载媒体数据文件扩展名",
-                                                },
-                                            }
-                                        ],
-                                    }
-                                ],
-                            },
-                        ],
-                    },
+                    {"component": "VCardText", "content": base_card_content},
                 ],
             },
+            account_pool_card,
             {
                 "component": "VCard",
                 "props": {"variant": "outlined"},
@@ -1405,6 +1467,7 @@ class P123StrmHelper(_PluginBase):
             "moviepilot_address": "",
             "user_rmt_mediaext": "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v",
             "user_download_mediaext": "srt,ssa,ass",
+            "account_pool": "",
             "transfer_monitor_enabled": False,
             "transfer_monitor_paths": "",
             "transfer_monitor_scrape_metadata_enabled": False,
