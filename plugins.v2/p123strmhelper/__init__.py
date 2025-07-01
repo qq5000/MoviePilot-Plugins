@@ -30,8 +30,6 @@ from app.schemas.types import EventType, MediaType
 from app.utils.system import SystemUtils
 
 from .tool import P123AutoClient
-
-
 class MediaInfoDownloader:
     """
     媒体信息文件下载器
@@ -449,8 +447,6 @@ class P123StrmHelper(_PluginBase):
     _scheduler = None
     _enabled = False
     _once_full_sync_strm = False
-    _passport = None
-    _password = None
     moviepilot_address = None
     _user_rmt_mediaext = None
     _user_download_mediaext = None
@@ -475,8 +471,8 @@ class P123StrmHelper(_PluginBase):
     _clear_receive_path_enabled = False
     _cron_clear = None
     # 账号池相关
-    account_pool = []  # [{"passport": "", "password": ""}, ...]
-    current_account_index = 0
+    _account_pool = []
+    _current_account_index = 0
 
     def init_plugin(self, config: dict = None):
         """
@@ -485,19 +481,6 @@ class P123StrmHelper(_PluginBase):
         if config:
             self._enabled = config.get("enabled")
             self._once_full_sync_strm = config.get("once_full_sync_strm")
-            self._passport = config.get("passport")
-            self._password = config.get("password")
-            # 账号池相关
-            self.account_pool = config.get("account_pool", [])
-            self.current_account_index = config.get("current_account_index", 0)
-            # 兼容旧配置：如果账号池为空，则用单账号
-            if not self.account_pool and self._passport and self._password:
-                self.account_pool = [{"passport": self._passport, "password": self._password}]
-                self.current_account_index = 0
-            # 切换到当前账号池账号
-            if self.account_pool:
-                self._passport = self.account_pool[self.current_account_index % len(self.account_pool)]["passport"]
-                self._password = self.account_pool[self.current_account_index % len(self.account_pool)]["password"]
             self.moviepilot_address = config.get("moviepilot_address")
             self._user_rmt_mediaext = config.get("user_rmt_mediaext")
             self._user_download_mediaext = config.get("user_download_mediaext")
@@ -532,6 +515,13 @@ class P123StrmHelper(_PluginBase):
             self._clear_recyclebin_enabled = config.get("clear_recyclebin_enabled")
             self._clear_receive_path_enabled = config.get("clear_receive_path_enabled")
             self._cron_clear = config.get("cron_clear")
+            # 账号池解析
+            account_pool_str = config.get("account_pool", "")
+            self._account_pool = []
+            for line in account_pool_str.strip().splitlines():
+                if "#" in line:
+                    passport, password = line.split("#", 1)
+                    self._account_pool.append({"passport": passport.strip(), "password": password.strip()})
             if not self._user_rmt_mediaext:
                 self._user_rmt_mediaext = "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v"
             if not self._user_download_mediaext:
@@ -544,6 +534,16 @@ class P123StrmHelper(_PluginBase):
                 self._user_share_pan_path = "/"
             self.__update_config()
 
+        # 初始化账号池第一个账号
+        if self._account_pool:
+            self._current_account_index = 0
+            account = self._account_pool[self._current_account_index]
+            self._passport = account.get("passport", "")
+            self._password = account.get("password", "")
+        else:
+            self._passport = ""
+            self._password = ""
+
         try:
             self._client = P123AutoClient(self._passport, self._password)
         except Exception as e:
@@ -552,15 +552,15 @@ class P123StrmHelper(_PluginBase):
         # 停止现有任务
         self.stop_service()
 
-        # 启动账号池定时切换任务
-        if self._enabled and len(self.account_pool) > 1:
+        # 定时账号池轮换
+        if self._enabled and self._account_pool:
             if not self._scheduler:
                 self._scheduler = BackgroundScheduler(timezone=settings.TZ)
             self._scheduler.add_job(
-                func=self.switch_account_job,
+                func=self.rotate_account,
                 trigger="interval",
                 hours=1,
-                name="账号池自动切换账号",
+                name="账号池轮换"
             )
             if self._scheduler.get_jobs():
                 self._scheduler.print_jobs()
@@ -595,6 +595,62 @@ class P123StrmHelper(_PluginBase):
             if self._scheduler.get_jobs():
                 self._scheduler.print_jobs()
                 self._scheduler.start()
+
+    def rotate_account(self):
+        """
+        账号池轮换，每小时切换账号
+        """
+        if not self._account_pool:
+            return
+        self._current_account_index = (self._current_account_index + 1) % len(self._account_pool)
+        account = self._account_pool[self._current_account_index]
+        self._passport = account.get("passport", "")
+        self._password = account.get("password", "")
+        # 手机号脱敏处理
+        passport_masked = self._passport
+        if len(passport_masked) >= 7:
+            passport_masked = f"{passport_masked[:3]}****{passport_masked[-4:]}"
+        logger.info(f"【账号池】账号轮换：当前索引 {self._current_account_index+1}/{len(self._account_pool)}，切换到账号：{passport_masked}")
+        try:
+            self._client = P123AutoClient(self._passport, self._password)
+            logger.info(f"【账号池】已切换账号：{passport_masked}")
+        except Exception as e:
+            logger.error(f"【账号池】切换账号失败: {e}")
+
+    def __update_config(self):
+        # 账号池转字符串
+        account_pool_str = "\n".join([
+            f"{acc['passport']}#{acc['password']}" for acc in self._account_pool
+        ])
+        self.update_config(
+            {
+                "enabled": self._enabled,
+                "once_full_sync_strm": self._once_full_sync_strm,
+                "moviepilot_address": self.moviepilot_address,
+                "user_rmt_mediaext": self._user_rmt_mediaext,
+                "user_download_mediaext": self._user_download_mediaext,
+                "transfer_monitor_enabled": self._transfer_monitor_enabled,
+                "transfer_monitor_paths": self._transfer_monitor_paths,
+                "transfer_monitor_scrape_metadata_enabled": self._transfer_monitor_scrape_metadata_enabled,
+                "transfer_mp_mediaserver_paths": self._transfer_mp_mediaserver_paths,
+                "transfer_monitor_media_server_refresh_enabled": self._transfer_monitor_media_server_refresh_enabled,
+                "transfer_monitor_mediaservers": self._transfer_monitor_mediaservers,
+                "timing_full_sync_strm": self._timing_full_sync_strm,
+                "full_sync_auto_download_mediainfo_enabled": self._full_sync_auto_download_mediainfo_enabled,
+                "cron_full_sync_strm": self._cron_full_sync_strm,
+                "full_sync_strm_paths": self._full_sync_strm_paths,
+                "share_strm_enabled": self._share_strm_enabled,
+                "share_strm_auto_download_mediainfo_enabled": self._share_strm_auto_download_mediainfo_enabled,
+                "user_share_code": self._user_share_code,
+                "user_share_pwd": self._user_share_pwd,
+                "user_share_pan_path": self._user_share_pan_path,
+                "user_share_local_path": self._user_share_local_path,
+                "clear_recyclebin_enabled": self._clear_recyclebin_enabled,
+                "clear_receive_path_enabled": self._clear_receive_path_enabled,
+                "cron_clear": self._cron_clear,
+                "account_pool": account_pool_str,
+            }
+        )
 
     def get_state(self) -> bool:
         return self._enabled
@@ -692,90 +748,6 @@ class P123StrmHelper(_PluginBase):
         拼装插件配置页面，需要返回两块数据：1、页面配置；2、数据结构
         """
         _mediaserver_helper = MediaServerHelper()
-
-        # 账号池管理区块
-        account_pool_tab = [
-            {
-                "component": "VRow",
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12},
-                        "content": [
-                            {
-                                "component": "VAlert",
-                                "props": {
-                                    "type": "info",
-                                    "variant": "tonal",
-                                    "density": "compact",
-                                    "class": "mb-2",
-                                },
-                                "content": [
-                                    {"component": "div", "text": "账号池支持多个账号轮换，每小时自动切换。"},
-                                    {"component": "div", "text": "每个账号为手机号+密码。"},
-                                ],
-                            },
-                            {
-                                "component": "VDataTable",
-                                "props": {
-                                    "items": "account_pool",
-                                    "headers": [
-                                        {"text": "手机号", "value": "passport"},
-                                        {"text": "密码", "value": "password"},
-                                        {"text": "操作", "value": "actions", "sortable": False},
-                                    ],
-                                    "item-key": "passport",
-                                    "hide-default-footer": True,
-                                },
-                                "scopedSlots": {
-                                    "item.actions": [
-                                        {
-                                            "component": "VBtn",
-                                            "props": {"icon": True, "color": "red"},
-                                            "on": {"click": "remove_account(item.passport)"},
-                                            "content": [
-                                                {"component": "VIcon", "props": {"icon": "mdi-delete"}},
-                                            ],
-                                        }
-                                    ]
-                                }
-                            },
-                            {
-                                "component": "VRow",
-                                "content": [
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 5},
-                                        "content": [
-                                            {"component": "VTextField", "props": {"model": "new_account_passport", "label": "手机号"}},
-                                        ],
-                                    },
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 5},
-                                        "content": [
-                                            {"component": "VTextField", "props": {"model": "new_account_password", "label": "密码", "type": "password"}},
-                                        ],
-                                    },
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 2},
-                                        "content": [
-                                            {
-                                                "component": "VBtn",
-                                                "props": {"color": "primary", "block": True},
-                                                "on": {"click": "add_account()"},
-                                                "content": ["添加账号"],
-                                            },
-                                        ],
-                                    },
-                                ],
-                            },
-                        ],
-                    },
-                ],
-            },
-        ]
 
         transfer_monitor_tab = [
             {
@@ -1217,6 +1189,100 @@ class P123StrmHelper(_PluginBase):
             },
         ]
 
+        # 基础设置卡片内容
+        base_card_content = [
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "enabled",
+                                    "label": "启用插件",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "moviepilot_address",
+                                    "label": "MoviePilot 内网访问地址",
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "user_rmt_mediaext",
+                                    "label": "可整理媒体文件扩展名",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "user_download_mediaext",
+                                    "label": "可下载媒体数据文件扩展名",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            # 账号池配置项
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextarea",
+                                "props": {
+                                    "model": "account_pool",
+                                    "label": "账号池（每行一个，格式：手机号#密码）",
+                                    "rows": 5,
+                                    "placeholder": "例如：\n13800000000#password1\n13900000000#password2",
+                                    "hint": "支持多个账号，自动轮换，每小时切换一次。",
+                                    "persistent-hint": True,
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+        ]
+
         return [
             {
                 "component": "VCard",
@@ -1238,106 +1304,7 @@ class P123StrmHelper(_PluginBase):
                         ],
                     },
                     {"component": "VDivider"},
-                    {
-                        "component": "VCardText",
-                        "content": [
-                            # 账号池管理区块插入到基础设置顶部
-                            *account_pool_tab,
-                            {
-                                "component": "VRow",
-                                "content": [
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12, "md": 3},
-                                        "content": [
-                                            {
-                                                "component": "VSwitch",
-                                                "props": {
-                                                    "model": "enabled",
-                                                    "label": "启用插件",
-                                                },
-                                            }
-                                        ],
-                                    },
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12, "md": 3},
-                                        "content": [
-                                            {
-                                                "component": "VTextField",
-                                                "props": {
-                                                    "model": "passport",
-                                                    "label": "手机号",
-                                                },
-                                            }
-                                        ],
-                                    },
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12, "md": 3},
-                                        "content": [
-                                            {
-                                                "component": "VTextField",
-                                                "props": {
-                                                    "model": "password",
-                                                    "label": "密码",
-                                                },
-                                            }
-                                        ],
-                                    },
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12, "md": 3},
-                                        "content": [
-                                            {
-                                                "component": "VTextField",
-                                                "props": {
-                                                    "model": "moviepilot_address",
-                                                    "label": "MoviePilot 内网访问地址",
-                                                },
-                                            }
-                                        ],
-                                    },
-                                ],
-                            },
-                            {
-                                "component": "VRow",
-                                "content": [
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12},
-                                        "content": [
-                                            {
-                                                "component": "VTextField",
-                                                "props": {
-                                                    "model": "user_rmt_mediaext",
-                                                    "label": "可整理媒体文件扩展名",
-                                                },
-                                            }
-                                        ],
-                                    }
-                                ],
-                            },
-                            {
-                                "component": "VRow",
-                                "content": [
-                                    {
-                                        "component": "VCol",
-                                        "props": {"cols": 12},
-                                        "content": [
-                                            {
-                                                "component": "VTextField",
-                                                "props": {
-                                                    "model": "user_download_mediaext",
-                                                    "label": "可下载媒体数据文件扩展名",
-                                                },
-                                            }
-                                        ],
-                                    }
-                                ],
-                            },
-                        ],
-                    },
+                    {"component": "VCardText", "content": base_card_content},
                 ],
             },
             {
@@ -1456,11 +1423,10 @@ class P123StrmHelper(_PluginBase):
         ], {
             "enabled": False,
             "once_full_sync_strm": False,
-            "passport": "",
-            "password": "",
             "moviepilot_address": "",
             "user_rmt_mediaext": "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v",
             "user_download_mediaext": "srt,ssa,ass",
+            "account_pool": "",
             "transfer_monitor_enabled": False,
             "transfer_monitor_paths": "",
             "transfer_monitor_scrape_metadata_enabled": False,
@@ -1481,478 +1447,10 @@ class P123StrmHelper(_PluginBase):
             "clear_receive_path_enabled": False,
             "cron_clear": "0 */7 * * *",
             "tab": "tab-transfer",
-            # 账号池相关
-            "account_pool": [],
-            "current_account_index": 0,
-            "new_account_passport": "",
-            "new_account_password": "",
         }
 
     def get_page(self) -> List[dict]:
         pass
-
-    def __update_config(self):
-        self.update_config(
-            {
-                "enabled": self._enabled,
-                "once_full_sync_strm": self._once_full_sync_strm,
-                "passport": self._passport,
-                "password": self._password,
-                "moviepilot_address": self.moviepilot_address,
-                "user_rmt_mediaext": self._user_rmt_mediaext,
-                "user_download_mediaext": self._user_download_mediaext,
-                "transfer_monitor_enabled": self._transfer_monitor_enabled,
-                "transfer_monitor_paths": self._transfer_monitor_paths,
-                "transfer_monitor_scrape_metadata_enabled": self._transfer_monitor_scrape_metadata_enabled,
-                "transfer_mp_mediaserver_paths": self._transfer_mp_mediaserver_paths,
-                "transfer_monitor_media_server_refresh_enabled": self._transfer_monitor_media_server_refresh_enabled,
-                "transfer_monitor_mediaservers": self._transfer_monitor_mediaservers,
-                "timing_full_sync_strm": self._timing_full_sync_strm,
-                "full_sync_auto_download_mediainfo_enabled": self._full_sync_auto_download_mediainfo_enabled,
-                "cron_full_sync_strm": self._cron_full_sync_strm,
-                "full_sync_strm_paths": self._full_sync_strm_paths,
-                "share_strm_enabled": self._share_strm_enabled,
-                "share_strm_auto_download_mediainfo_enabled": self._share_strm_auto_download_mediainfo_enabled,
-                "user_share_code": self._user_share_code,
-                "user_share_pwd": self._user_share_pwd,
-                "user_share_pan_path": self._user_share_pan_path,
-                "user_share_local_path": self._user_share_local_path,
-                "clear_recyclebin_enabled": self._clear_recyclebin_enabled,
-                "clear_receive_path_enabled": self._clear_receive_path_enabled,
-                "cron_clear": self._cron_clear,
-                # 账号池相关
-                "account_pool": self.account_pool,
-                "current_account_index": self.current_account_index,
-                "new_account_passport": "",
-                "new_account_password": "",
-            }
-        )
-
-    @staticmethod
-    def has_prefix(full_path, prefix_path):
-        """
-        判断路径是否包含
-        """
-        full = Path(full_path).parts
-        prefix = Path(prefix_path).parts
-
-        if len(prefix) > len(full):
-            return False
-
-        return full[: len(prefix)] == prefix
-
-    def __get_media_path(self, paths, media_path):
-        """
-        获取媒体目录路径
-        """
-        media_paths = paths.split("\n")
-        for path in media_paths:
-            if not path:
-                continue
-            parts = path.split("#", 1)
-            if self.has_prefix(media_path, parts[1]):
-                return True, parts[0], parts[1]
-        return False, None, None
-
-    @staticmethod
-    def media_scrape_metadata(
-        path,
-        item_name: str = "",
-        mediainfo: MediaInfo = None,
-        meta: MetaBase = None,
-    ):
-        """
-        媒体刮削服务
-        :param path: 媒体文件路径
-        :param item_name: 媒体名称
-        :param meta: 元数据
-        :param mediainfo: 媒体信息
-        """
-        item_name = item_name if item_name else Path(path).name
-        mediachain = MediaChain()
-        logger.info(f"【媒体刮削】{item_name} 开始刮削元数据")
-        if mediainfo:
-            # 整理文件刮削
-            if mediainfo.type == MediaType.MOVIE:
-                # 电影刮削上级文件夹
-                dir_path = Path(path).parent
-                fileitem = FileItem(
-                    storage="local",
-                    type="dir",
-                    path=str(dir_path),
-                    name=dir_path.name,
-                    basename=dir_path.stem,
-                    modify_time=dir_path.stat().st_mtime,
-                )
-            else:
-                # 电视剧刮削文件夹
-                # 通过重命名格式判断根目录文件夹
-                # 计算重命名中的文件夹层数
-                rename_format_level = len(settings.TV_RENAME_FORMAT.split("/")) - 1
-                if rename_format_level < 1:
-                    file_path = Path(path)
-                    fileitem = FileItem(
-                        storage="local",
-                        type="file",
-                        path=str(file_path).replace("\\", "/"),
-                        name=file_path.name,
-                        basename=file_path.stem,
-                        extension=file_path.suffix[1:],
-                        size=file_path.stat().st_size,
-                        modify_time=file_path.stat().st_mtime,
-                    )
-                else:
-                    dir_path = Path(Path(path).parents[rename_format_level - 1])
-                    fileitem = FileItem(
-                        storage="local",
-                        type="dir",
-                        path=str(dir_path),
-                        name=dir_path.name,
-                        basename=dir_path.stem,
-                        modify_time=dir_path.stat().st_mtime,
-                    )
-            mediachain.scrape_metadata(
-                fileitem=fileitem, meta=meta, mediainfo=mediainfo
-            )
-        else:
-            # 对于没有 mediainfo 的媒体文件刮削
-            # 获取媒体信息
-            meta = MetaInfoPath(Path(path))
-            mediainfo = mediachain.recognize_by_meta(meta)
-            # 判断刮削路径
-            # 先获取上级目录 meta
-            file_type = "dir"
-            dir_path = Path(path).parent
-            tem_mediainfo = mediachain.recognize_by_meta(MetaInfoPath(dir_path))
-            # 只有上级目录信息和文件的信息一致时才继续判断上级目录
-            if tem_mediainfo and tem_mediainfo.imdb_id == mediainfo.imdb_id:
-                if mediainfo.type == MediaType.TV:
-                    # 如果是电视剧，再次获取上级目录媒体信息，兼容电视剧命名，获取 mediainfo
-                    dir_path = dir_path.parent
-                    tem_mediainfo = mediachain.recognize_by_meta(MetaInfoPath(dir_path))
-                    if tem_mediainfo and tem_mediainfo.imdb_id == mediainfo.imdb_id:
-                        # 存在 mediainfo 则使用本级目录
-                        finish_path = dir_path
-                    else:
-                        # 否则使用上级目录
-                        logger.warn(f"【媒体刮削】{dir_path} 无法识别文件媒体信息！")
-                        finish_path = Path(path).parent
-                else:
-                    # 电影情况，使用当前目录和元数据
-                    finish_path = dir_path
-            else:
-                # 如果上级目录没有媒体信息则使用传入的路径
-                logger.warn(f"【媒体刮削】{dir_path} 无法识别文件媒体信息！")
-                finish_path = Path(path)
-                file_type = "file"
-            fileitem = FileItem(
-                storage="local",
-                type=file_type,
-                path=str(finish_path),
-                name=finish_path.name,
-                basename=finish_path.stem,
-                modify_time=finish_path.stat().st_mtime,
-            )
-            mediachain.scrape_metadata(
-                fileitem=fileitem, meta=meta, mediainfo=mediainfo
-            )
-
-        logger.info(f"【媒体刮削】{item_name} 刮削元数据完成")
-
-    @cached(cache=TTLCache(maxsize=1, ttl=2 * 60))
-    def redirect_url(
-        self,
-        request: Request,
-        name: str = "",
-        size: int = 0,
-        md5: str = "",
-        s3_key_flag: str = "",
-    ):
-        """
-        123云盘302跳转
-        """
-        if not s3_key_flag:
-            try:
-                resp = self._client.fs_mkdir("我的秒传")
-                check_response(resp)
-                resp = self._client.upload_file_fast(
-                    file_md5=md5,
-                    file_name=f"{md5}-{size}",
-                    file_size=size,
-                    parent_id=resp["data"]["Info"]["FileId"],
-                    duplicate=2,
-                )
-                check_response(resp)
-                payload = resp["data"]["Info"]
-                logger.info(
-                    f"【302跳转服务】转存 {name} 文件成功: {payload['S3KeyFlag']}"
-                )
-            except Exception as e:
-                logger.error(f"【302跳转服务】转存 {name} 文件失败: {e}")
-                return JSONResponse(
-                    {"state": False, "message": f"转存 {name} 文件失败: {e}"}, 500
-                )
-        else:
-            payload = {
-                "S3KeyFlag": s3_key_flag,
-                "FileName": name,
-                "Etag": md5,
-                "Size": size,
-            }
-
-        try:
-            user_agent = request.headers.get("User-Agent") or b""
-            logger.debug(f"【302跳转服务】获取到客户端UA: {user_agent}")
-            resp = self._client.download_info(
-                payload,
-                base_url="",
-                async_=False,
-                headers={"User-Agent": user_agent},
-            )
-            check_response(resp)
-            url = resp["data"]["DownloadUrl"]
-            logger.info(f"【302跳转服务】获取 123 下载地址成功: {url}")
-        except Exception as e:
-            logger.error(f"【302跳转服务】获取 123 下载地址失败: {e}")
-
-        return RedirectResponse(url, 302)
-
-    @eventmanager.register(EventType.TransferComplete)
-    def generate_strm(self, event: Event):
-        """
-        监控目录整理生成 STRM 文件
-        """
-
-        def generate_strm_files(
-            target_dir: Path,
-            pan_media_dir: Path,
-            item_dest_path: Path,
-            basename: str,
-            url: str,
-        ):
-            """
-            依据网盘路径生成 STRM 文件
-            """
-            try:
-                pan_media_dir = str(Path(pan_media_dir))
-                pan_path = Path(item_dest_path).parent
-                pan_path = str(Path(pan_path))
-                if self.has_prefix(pan_path, pan_media_dir):
-                    pan_path = pan_path[len(pan_media_dir) :].lstrip("/").lstrip("\\")
-                file_path = Path(target_dir) / pan_path
-                file_name = basename + ".strm"
-                new_file_path = file_path / file_name
-                new_file_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(new_file_path, "w", encoding="utf-8") as file:
-                    file.write(url)
-                logger.info(
-                    "【监控整理STRM生成】生成 STRM 文件成功: %s", str(new_file_path)
-                )
-                return True, new_file_path
-            except Exception as e:  # noqa: F841
-                logger.error(
-                    "【监控整理STRM生成】生成 %s 文件失败: %s", str(new_file_path), e
-                )
-                return False, None
-
-        if (
-            not self._enabled
-            or not self._transfer_monitor_enabled
-            or not self._transfer_monitor_paths
-            or not self.moviepilot_address
-        ):
-            return
-
-        item = event.event_data
-        if not item:
-            return
-
-        # 转移信息
-        item_transfer: TransferInfo = item.get("transferinfo")
-        # 媒体信息
-        mediainfo: MediaInfo = item.get("mediainfo")
-        # 元数据信息
-        meta: MetaBase = item.get("meta")
-
-        item_dest_storage: FileItem = item_transfer.target_item.storage
-        if item_dest_storage != "123云盘":
-            return
-
-        # 网盘目的地目录
-        itemdir_dest_path: FileItem = item_transfer.target_diritem.path
-        # 网盘目的地路径（包含文件名称）
-        item_dest_path: FileItem = item_transfer.target_item.path
-        # 网盘目的地文件名称
-        item_dest_name: FileItem = item_transfer.target_item.name
-        # 网盘目的地文件名称（不包含后缀）
-        item_dest_basename: FileItem = item_transfer.target_item.basename
-        # 网盘目的地文件网盘详细信息
-        item_dest_pickcode: FileItem = item_transfer.target_item.pickcode
-        if not item_dest_pickcode:
-            logger.error(
-                f"【监控整理STRM生成】{item_dest_name} 不存在网盘详细信息，无法生成 STRM 文件"
-            )
-            return
-        item_dest_info = ast.literal_eval(item_dest_pickcode)
-        # 是否蓝光原盘
-        item_bluray = SystemUtils.is_bluray_dir(Path(itemdir_dest_path))
-        # 目标字幕文件清单
-        subtitle_list = getattr(item_transfer, "subtitle_list_new", [])
-        # 目标音频文件清单
-        audio_list = getattr(item_transfer, "audio_list_new", [])
-
-        __itemdir_dest_path, local_media_dir, pan_media_dir = self.__get_media_path(
-            self._transfer_monitor_paths, itemdir_dest_path
-        )
-        if not __itemdir_dest_path:
-            logger.debug(
-                f"【监控整理STRM生成】{item_dest_name} 路径匹配不符合，跳过整理"
-            )
-            return
-        logger.debug("【监控整理STRM生成】匹配到网盘文件夹路径: %s", str(pan_media_dir))
-
-        if item_bluray:
-            logger.warning(
-                f"【监控整理STRM生成】{item_dest_name} 为蓝光原盘，不支持生成 STRM 文件: {item_dest_path}"
-            )
-            return
-
-        if (
-            not item_dest_info["FileName"]
-            or not item_dest_info["Size"]
-            or not item_dest_info["Etag"]
-            or not item_dest_info["S3KeyFlag"]
-        ):
-            logger.error(
-                f"【监控整理STRM生成】{item_dest_name} 缺失必要文件信息，无法生成 STRM 文件: {item_dest_info}"
-            )
-            return
-
-        strm_url = f"{self.moviepilot_address.rstrip('/')}/api/v1/plugin/P123StrmHelper/redirect_url?apikey={settings.API_TOKEN}&name={item_dest_info['FileName']}&size={item_dest_info['Size']}&md5={item_dest_info['Etag']}&s3_key_flag={item_dest_info['S3KeyFlag']}"
-
-        status, strm_target_path = generate_strm_files(
-            target_dir=local_media_dir,
-            pan_media_dir=pan_media_dir,
-            item_dest_path=item_dest_path,
-            basename=item_dest_basename,
-            url=strm_url,
-        )
-        if not status:
-            return
-
-        try:
-            _storagechain = StorageChain()
-            _mediainfodownloader = MediaInfoDownloader(client=self._client)
-
-            if subtitle_list:
-                logger.info("【监控整理STRM生成】开始下载字幕文件")
-                for _path in subtitle_list:
-                    fileitem = _storagechain.get_file_item(
-                        storage="123云盘", path=Path(_path)
-                    )
-                    fileitem_info = ast.literal_eval(fileitem.pickcode)
-                    download_url = _mediainfodownloader.get_download_url(
-                        item={
-                            "Etag": fileitem_info["Etag"],
-                            "FileID": int(fileitem_info["FileId"]),
-                            "FileName": fileitem_info["FileName"],
-                            "S3KeyFlag": fileitem_info["S3KeyFlag"],
-                            "Size": int(fileitem_info["Size"]),
-                        }
-                    )
-                    if not download_url:
-                        logger.error(
-                            f"【监控整理STRM生成】{Path(_path).name} 下载链接获取失败，无法下载该文件"
-                        )
-                        continue
-                    _file_path = Path(local_media_dir) / Path(_path).relative_to(
-                        pan_media_dir
-                    )
-                    _mediainfodownloader.save_mediainfo_file(
-                        file_path=Path(_file_path),
-                        file_name=_file_path.name,
-                        download_url=download_url,
-                    )
-
-            if audio_list:
-                logger.info("【监控整理STRM生成】开始下载音频文件")
-                for _path in audio_list:
-                    fileitem = _storagechain.get_file_item(
-                        storage="123云盘", path=Path(_path)
-                    )
-                    fileitem_info = ast.literal_eval(fileitem.pickcode)
-                    download_url = _mediainfodownloader.get_download_url(
-                        item={
-                            "Etag": fileitem_info["Etag"],
-                            "FileID": int(fileitem_info["FileId"]),
-                            "FileName": fileitem_info["FileName"],
-                            "S3KeyFlag": fileitem_info["S3KeyFlag"],
-                            "Size": int(fileitem_info["Size"]),
-                        }
-                    )
-                    if not download_url:
-                        logger.error(
-                            f"【监控整理STRM生成】{Path(_path).name} 下载链接获取失败，无法下载该文件"
-                        )
-                        continue
-                    _file_path = Path(local_media_dir) / Path(_path).relative_to(
-                        pan_media_dir
-                    )
-                    _mediainfodownloader.save_mediainfo_file(
-                        file_path=Path(_file_path),
-                        file_name=_file_path.name,
-                        download_url=download_url,
-                    )
-        except Exception as e:
-            logger.error(f"【监控整理STRM生成】媒体信息文件下载出现未知错误: {e}")
-
-        if self._transfer_monitor_scrape_metadata_enabled:
-            self.media_scrape_metadata(
-                path=strm_target_path,
-                item_name=item_dest_name,
-                mediainfo=mediainfo,
-                meta=meta,
-            )
-
-        if self._transfer_monitor_media_server_refresh_enabled:
-            if not self.service_infos:
-                return
-
-            logger.info("【监控整理STRM生成】开始刷新媒体服务器")
-
-            if self._transfer_mp_mediaserver_paths:
-                status, mediaserver_path, moviepilot_path = self.__get_media_path(
-                    self._transfer_mp_mediaserver_paths, strm_target_path
-                )
-                if status:
-                    logger.info("【监控整理STRM生成】刷新媒体服务器目录替换中...")
-                    strm_target_path = strm_target_path.replace(
-                        moviepilot_path, mediaserver_path
-                    ).replace("\\", "/")
-                    logger.info(
-                        f"【监控整理STRM生成】刷新媒体服务器目录替换: {moviepilot_path} --> {mediaserver_path}"
-                    )
-                    logger.info(
-                        f"【监控整理STRM生成】刷新媒体服务器目录: {strm_target_path}"
-                    )
-
-            items = [
-                RefreshMediaItem(
-                    title=mediainfo.title,
-                    year=mediainfo.year,
-                    type=mediainfo.type,
-                    category=mediainfo.category,
-                    target_path=Path(strm_target_path),
-                )
-            ]
-
-            for name, service in self.service_infos.items():
-                if hasattr(service.instance, "refresh_library_by_items"):
-                    service.instance.refresh_library_by_items(items)
-                elif hasattr(service.instance, "refresh_root_library"):
-                    service.instance.refresh_root_library()
-                else:
-                    logger.warning(f"【监控整理STRM生成】{name} 不支持刷新")
 
     def full_sync_strm_files(self):
         """
@@ -2068,30 +1566,3 @@ class P123StrmHelper(_PluginBase):
                 self._scheduler = None
         except Exception as e:
             print(str(e))
-
-    def switch_account_job(self):
-        """
-        定时切换账号池账号并重启服务
-        """
-        if not self.account_pool:
-            return
-        self.current_account_index = (self.current_account_index + 1) % len(self.account_pool)
-        self._passport = self.account_pool[self.current_account_index]["passport"]
-        self._password = self.account_pool[self.current_account_index]["password"]
-        logger.info(f"【账号池】切换账号为：{self._passport}")
-        self.__update_config()
-        # 重启服务
-        self.restart_service()
-
-    def restart_service(self):
-        """
-        重启服务（重新初始化 client 并重载任务）
-        """
-        self.stop_service()
-        try:
-            self._client = P123AutoClient(self._passport, self._password)
-            logger.info(f"【账号池】账号 {self._passport} 登录成功，服务已重启")
-        except Exception as e:
-            logger.error(f"【账号池】账号 {self._passport} 登录失败: {e}")
-        # 可根据需要重新启动定时任务等
-        # 这里只做简单重启，如需更复杂可补充
