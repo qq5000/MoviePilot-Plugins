@@ -1,60 +1,35 @@
-import json
-import time
-import os
-from apscheduler.triggers.interval import IntervalTrigger
-from typing import List, Dict, Any
-
 import ast
-import datetime
-import pytz
-import requests
-from apscheduler.schedulers.background import BackgroundScheduler
-from cachetools import cached, TTLCache
-from fastapi import Request, JSONResponse, RedirectResponse
+import time
+from datetime import datetime, timedelta
+from typing import Any, List, Dict, Tuple, Optional
 from pathlib import Path
+
+import pytz
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from fastapi import Request
+from fastapi.responses import JSONResponse, RedirectResponse
+import requests
+from cachetools import cached, TTLCache
+from p123client import check_response
+from p123client.tool import iterdir, share_iterdir
 
 from app.chain.storage import StorageChain
 from app.core.config import settings
-from app.core.context import MediaInfo, MetaBase
 from app.core.event import eventmanager, Event
+from app.core.context import MediaInfo
+from app.core.meta import MetaBase
 from app.core.metainfo import MetaInfoPath
 from app.log import logger
 from app.plugins import _PluginBase
 from app.schemas import TransferInfo, FileItem, RefreshMediaItem, ServiceInfo
+from app.core.context import MediaInfo
+from app.helper.mediaserver import MediaServerHelper
 from app.chain.media import MediaChain
 from app.schemas.types import EventType, MediaType
 from app.utils.system import SystemUtils
-from p123client import check_response
-from p123client.tool import iterdir, share_iterdir
 
 from .tool import P123AutoClient
-
-
-class AccountPool:
-    """
-    账号池管理类
-    """
-
-    def __init__(self, accounts: List[Dict[str, str]]):
-        self.accounts = accounts
-        self.current_index = 0
-
-    def get_next_account(self) -> Dict[str, str]:
-        """
-        获取下一个账号
-        """
-        if not self.accounts:
-            return None
-        self.current_index = (self.current_index + 1) % len(self.accounts)
-        return self.accounts[self.current_index - 1]
-
-    def get_current_account(self) -> Dict[str, str]:
-        """
-        获取当前账号
-        """
-        if not self.accounts:
-            return None
-        return self.accounts[self.current_index]
 
 
 class MediaInfoDownloader:
@@ -483,8 +458,8 @@ class P123StrmHelper(_PluginBase):
     _transfer_monitor_paths = None
     _transfer_monitor_scrape_metadata_enabled = False
     _transfer_mp_mediaserver_paths = None
-    _transfer_monitor_media_server_refresh_enabled = False
     _transfer_monitor_mediaservers = None
+    _transfer_monitor_media_server_refresh_enabled = False
     _timing_full_sync_strm = False
     _full_sync_auto_download_mediainfo_enabled = False
     _cron_full_sync_strm = None
@@ -499,116 +474,127 @@ class P123StrmHelper(_PluginBase):
     _clear_recyclebin_enabled = False
     _clear_receive_path_enabled = False
     _cron_clear = None
-
     # 账号池相关
-    _account_pool = None
-    _account_switch_interval = 60  # 每小时切换一次账号（分钟）
+    account_pool = []  # [{"passport": "", "password": ""}, ...]
+    current_account_index = 0
 
     def init_plugin(self, config: dict = None):
         """
         初始化插件
         """
-        # 从配置文件加载账号池信息
-        config_file = Path("config.json")
-        if config_file.exists():
-            with open(config_file, "r", encoding="utf-8") as f:
-                config = json.load(f)
-        else:
-            config = config or {}
-
-        # 加载账号池配置
-        account_pool_config = config.get("account_pool", [])
-        account_switch_interval = config.get("account_switch_interval", 60)
-
-        # 初始化账号池
-        self._account_pool = AccountPool(account_pool_config)
-        self._account_switch_interval = account_switch_interval
-
-        # 切换账号
-        self._switch_account()
-
-        # 添加定时任务切换账号
-        if not self._scheduler:
-            self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-        self._scheduler.add_job(
-            func=self._switch_account,
-            trigger=IntervalTrigger(
-                minutes=self._account_switch_interval
-            ),
-            name="123云盘账号切换",
-        )
-
-        # 其他配置加载
-        self._enabled = config.get("enabled", False)
-        self._once_full_sync_strm = config.get("once_full_sync_strm", False)
-        self._passport = config.get("passport")
-        self._password = config.get("password")
-        self.moviepilot_address = config.get("moviepilot_address")
-        self._user_rmt_mediaext = config.get("user_rmt_mediaext")
-        self._user_download_mediaext = config.get("user_download_mediaext")
-        self._transfer_monitor_enabled = config.get("transfer_monitor_enabled", False)
-        self._transfer_monitor_paths = config.get("transfer_monitor_paths")
-        self._transfer_monitor_scrape_metadata_enabled = config.get(
-            "transfer_monitor_scrape_metadata_enabled", False
-        )
-        self._transfer_mp_mediaserver_paths = config.get(
-            "transfer_mp_mediaserver_paths"
-        )
-        self._transfer_monitor_media_server_refresh_enabled = config.get(
-            "transfer_monitor_media_server_refresh_enabled", False
-        )
-        self._transfer_monitor_mediaservers = config.get(
-            "transfer_monitor_mediaservers", []
-        )
-        self._timing_full_sync_strm = config.get("timing_full_sync_strm", False)
-        self._full_sync_auto_download_mediainfo_enabled = config.get(
-            "full_sync_auto_download_mediainfo_enabled", False
-        )
-        self._cron_full_sync_strm = config.get("cron_full_sync_strm", "0 */7 * * *")
-        self._full_sync_strm_paths = config.get("full_sync_strm_paths")
-        self._share_strm_enabled = config.get("share_strm_enabled", False)
-        self._share_strm_auto_download_mediainfo_enabled = config.get(
-            "share_strm_auto_download_mediainfo_enabled", False
-        )
-        self._user_share_code = config.get("user_share_code")
-        self._user_share_pwd = config.get("user_share_pwd")
-        self._user_share_pan_path = config.get("user_share_pan_path", "/")
-        self._user_share_local_path = config.get("user_share_local_path")
-        self._clear_recyclebin_enabled = config.get("clear_recyclebin_enabled", False)
-        self._clear_receive_path_enabled = config.get(
-            "clear_receive_path_enabled", False
-        )
-        self._cron_clear = config.get("cron_clear", "0 */7 * * *")
-
-        if not self._user_rmt_mediaext:
-            self._user_rmt_mediaext = (
-                "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v"
+        if config:
+            self._enabled = config.get("enabled")
+            self._once_full_sync_strm = config.get("once_full_sync_strm")
+            self._passport = config.get("passport")
+            self._password = config.get("password")
+            # 账号池相关
+            self.account_pool = config.get("account_pool", [])
+            self.current_account_index = config.get("current_account_index", 0)
+            # 兼容旧配置：如果账号池为空，则用单账号
+            if not self.account_pool and self._passport and self._password:
+                self.account_pool = [{"passport": self._passport, "password": self._password}]
+                self.current_account_index = 0
+            # 切换到当前账号池账号
+            if self.account_pool:
+                self._passport = self.account_pool[self.current_account_index % len(self.account_pool)]["passport"]
+                self._password = self.account_pool[self.current_account_index % len(self.account_pool)]["password"]
+            self.moviepilot_address = config.get("moviepilot_address")
+            self._user_rmt_mediaext = config.get("user_rmt_mediaext")
+            self._user_download_mediaext = config.get("user_download_mediaext")
+            self._transfer_monitor_enabled = config.get("transfer_monitor_enabled")
+            self._transfer_monitor_paths = config.get("transfer_monitor_paths")
+            self._transfer_monitor_scrape_metadata_enabled = config.get(
+                "transfer_monitor_scrape_metadata_enabled"
             )
-        if not self._user_download_mediaext:
-            self._user_download_mediaext = "srt,ssa,ass"
-        if not self._cron_full_sync_strm:
-            self._cron_full_sync_strm = "0 */7 * * *"
-        if not self._cron_clear:
-            self._cron_clear = "0 */7 * * *"
-        if not self._user_share_pan_path:
-            self._user_share_pan_path = "/"
+            self._transfer_mp_mediaserver_paths = config.get(
+                "transfer_mp_mediaserver_paths"
+            )
+            self._transfer_monitor_media_server_refresh_enabled = config.get(
+                "transfer_monitor_media_server_refresh_enabled"
+            )
+            self._transfer_monitor_mediaservers = (
+                config.get("transfer_monitor_mediaservers") or []
+            )
+            self._timing_full_sync_strm = config.get("timing_full_sync_strm")
+            self._full_sync_auto_download_mediainfo_enabled = config.get(
+                "full_sync_auto_download_mediainfo_enabled"
+            )
+            self._cron_full_sync_strm = config.get("cron_full_sync_strm")
+            self._full_sync_strm_paths = config.get("full_sync_strm_paths")
+            self._share_strm_enabled = config.get("share_strm_enabled")
+            self._share_strm_auto_download_mediainfo_enabled = config.get(
+                "share_strm_auto_download_mediainfo_enabled"
+            )
+            self._user_share_code = config.get("user_share_code")
+            self._user_share_pwd = config.get("user_share_pwd")
+            self._user_share_pan_path = config.get("user_share_pan_path")
+            self._user_share_local_path = config.get("user_share_local_path")
+            self._clear_recyclebin_enabled = config.get("clear_recyclebin_enabled")
+            self._clear_receive_path_enabled = config.get("clear_receive_path_enabled")
+            self._cron_clear = config.get("cron_clear")
+            if not self._user_rmt_mediaext:
+                self._user_rmt_mediaext = "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v"
+            if not self._user_download_mediaext:
+                self._user_download_mediaext = "srt,ssa,ass"
+            if not self._cron_full_sync_strm:
+                self._cron_full_sync_strm = "0 */7 * * *"
+            if not self._cron_clear:
+                self._cron_clear = "0 */7 * * *"
+            if not self._user_share_pan_path:
+                self._user_share_pan_path = "/"
+            self.__update_config()
 
         try:
-            if not self._client and self._passport and self._password:
-                self._client = P123AutoClient(self._passport, self._password)
+            self._client = P123AutoClient(self._passport, self._password)
         except Exception as e:
             logger.error(f"123云盘客户端创建失败: {e}")
 
         # 停止现有任务
         self.stop_service()
 
+        # 启动账号池定时切换任务
+        if self._enabled and len(self.account_pool) > 1:
+            if not self._scheduler:
+                self._scheduler = BackgroundScheduler(timezone=settings.TZ)
+            self._scheduler.add_job(
+                func=self.switch_account_job,
+                trigger="interval",
+                hours=1,
+                name="账号池自动切换账号",
+            )
+            if self._scheduler.get_jobs():
+                self._scheduler.print_jobs()
+                self._scheduler.start()
+
         if self._enabled and self._once_full_sync_strm:
+            self._scheduler = BackgroundScheduler(timezone=settings.TZ)
+            self._scheduler.add_job(
+                func=self.full_sync_strm_files,
+                trigger="date",
+                run_date=datetime.now(tz=pytz.timezone(settings.TZ))
+                + timedelta(seconds=3),
+                name="123云盘助手立刻全量同步",
+            )
             self._once_full_sync_strm = False
-            self.full_sync_strm_files()
+            self.__update_config()
+            if self._scheduler.get_jobs():
+                self._scheduler.print_jobs()
+                self._scheduler.start()
 
         if self._enabled and self._share_strm_enabled:
+            self._scheduler = BackgroundScheduler(timezone=settings.TZ)
+            self._scheduler.add_job(
+                func=self.share_strm_files,
+                trigger="date",
+                run_date=datetime.now(tz=pytz.timezone(settings.TZ))
+                + timedelta(seconds=3),
+                name="123云盘助手分享生成STRM",
+            )
             self._share_strm_enabled = False
-            self.share_strm_files()
+            self.__update_config()
+            if self._scheduler.get_jobs():
+                self._scheduler.print_jobs()
+                self._scheduler.start()
 
     def get_state(self) -> bool:
         return self._enabled
@@ -706,6 +692,90 @@ class P123StrmHelper(_PluginBase):
         拼装插件配置页面，需要返回两块数据：1、页面配置；2、数据结构
         """
         _mediaserver_helper = MediaServerHelper()
+
+        # 账号池管理区块
+        account_pool_tab = [
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VAlert",
+                                "props": {
+                                    "type": "info",
+                                    "variant": "tonal",
+                                    "density": "compact",
+                                    "class": "mb-2",
+                                },
+                                "content": [
+                                    {"component": "div", "text": "账号池支持多个账号轮换，每小时自动切换。"},
+                                    {"component": "div", "text": "每个账号为手机号+密码。"},
+                                ],
+                            },
+                            {
+                                "component": "VDataTable",
+                                "props": {
+                                    "items": "account_pool",
+                                    "headers": [
+                                        {"text": "手机号", "value": "passport"},
+                                        {"text": "密码", "value": "password"},
+                                        {"text": "操作", "value": "actions", "sortable": False},
+                                    ],
+                                    "item-key": "passport",
+                                    "hide-default-footer": True,
+                                },
+                                "scopedSlots": {
+                                    "item.actions": [
+                                        {
+                                            "component": "VBtn",
+                                            "props": {"icon": True, "color": "red"},
+                                            "on": {"click": "remove_account(item.passport)"},
+                                            "content": [
+                                                {"component": "VIcon", "props": {"icon": "mdi-delete"}},
+                                            ],
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "component": "VRow",
+                                "content": [
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 5},
+                                        "content": [
+                                            {"component": "VTextField", "props": {"model": "new_account_passport", "label": "手机号"}},
+                                        ],
+                                    },
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 5},
+                                        "content": [
+                                            {"component": "VTextField", "props": {"model": "new_account_password", "label": "密码", "type": "password"}},
+                                        ],
+                                    },
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 2},
+                                        "content": [
+                                            {
+                                                "component": "VBtn",
+                                                "props": {"color": "primary", "block": True},
+                                                "on": {"click": "add_account()"},
+                                                "content": ["添加账号"],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ]
 
         transfer_monitor_tab = [
             {
@@ -1147,45 +1217,6 @@ class P123StrmHelper(_PluginBase):
             },
         ]
 
-        account_pool_tab = [
-            {
-                "component": "VRow",
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12, "md": 6},
-                        "content": [
-                            {
-                                "component": "VTextarea",
-                                "props": {
-                                    "model": "account_pool",
-                                    "label": "账号池",
-                                    "rows": 5,
-                                    "placeholder": "每行一个账号，格式：passport,password",
-                                },
-                            }
-                        ],
-                    },
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12, "md": 6},
-                        "content": [
-                            {
-                                "component": "VTextField",
-                                "props": {
-                                    "model": "account_switch_interval",
-                                    "label": "账号切换时间间隔（分钟）",
-                                    "type": "number",
-                                    "min": 1,
-                                    "value": 60,
-                                },
-                            }
-                        ],
-                    },
-                ],
-            },
-        ]
-
         return [
             {
                 "component": "VCard",
@@ -1210,6 +1241,8 @@ class P123StrmHelper(_PluginBase):
                     {
                         "component": "VCardText",
                         "content": [
+                            # 账号池管理区块插入到基础设置顶部
+                            *account_pool_tab,
                             {
                                 "component": "VRow",
                                 "content": [
@@ -1375,21 +1408,6 @@ class P123StrmHelper(_PluginBase):
                                     {"component": "span", "text": "定期清理"},
                                 ],
                             },
-                            {
-                                "component": "VTab",
-                                "props": {"value": "tab-account"},
-                                "content": [
-                                    {
-                                        "component": "VIcon",
-                                        "props": {
-                                            "icon": "mdi-account-group",
-                                            "start": True,
-                                            "color": "#9C27B0",
-                                        },
-                                    },
-                                    {"component": "span", "text": "账号池设置"},
-                                ],
-                            },
                         ],
                     },
                     {"component": "VDivider"},
@@ -1431,13 +1449,6 @@ class P123StrmHelper(_PluginBase):
                                     {"component": "VCardText", "content": cleanup_tab}
                                 ],
                             },
-                            {
-                                "component": "VWindowItem",
-                                "props": {"value": "tab-account"},
-                                "content": [
-                                    {"component": "VCardText", "content": account_pool_tab}
-                                ],
-                            },
                         ],
                     },
                 ],
@@ -1469,9 +1480,16 @@ class P123StrmHelper(_PluginBase):
             "clear_recyclebin_enabled": False,
             "clear_receive_path_enabled": False,
             "cron_clear": "0 */7 * * *",
+            "tab": "tab-transfer",
+            # 账号池相关
             "account_pool": [],
-            "account_switch_interval": 60,
+            "current_account_index": 0,
+            "new_account_passport": "",
+            "new_account_password": "",
         }
+
+    def get_page(self) -> List[dict]:
+        pass
 
     def __update_config(self):
         self.update_config(
@@ -1502,8 +1520,11 @@ class P123StrmHelper(_PluginBase):
                 "clear_recyclebin_enabled": self._clear_recyclebin_enabled,
                 "clear_receive_path_enabled": self._clear_receive_path_enabled,
                 "cron_clear": self._cron_clear,
-                "account_pool": self._account_pool.accounts if self._account_pool else [],
-                "account_switch_interval": self._account_switch_interval,
+                # 账号池相关
+                "account_pool": self.account_pool,
+                "current_account_index": self.current_account_index,
+                "new_account_passport": "",
+                "new_account_password": "",
             }
         )
 
@@ -1986,30 +2007,6 @@ class P123StrmHelper(_PluginBase):
             logger.error(f"【分享STRM生成】运行失败: {e}")
             return
 
-    def _switch_account(self):
-        """
-        切换账号
-        """
-        if not self._account_pool or not self._account_pool.accounts:
-            logger.warning("账号池为空，无法切换账号")
-            return
-
-        next_account = self._account_pool.get_next_account()
-        if not next_account:
-            logger.warning("获取下一个账号失败")
-            return
-
-        # 更新当前账号
-        self._passport = next_account.get("passport")
-        self._password = next_account.get("password")
-
-        try:
-            # 重新初始化客户端
-            self._client = P123AutoClient(self._passport, self._password)
-            logger.info(f"切换账号成功，当前账号：{self._passport}")
-        except Exception as e:
-            logger.error(f"切换账号失败：{e}")
-
     def main_cleaner(self):
         """
         主清理模块
@@ -2071,3 +2068,30 @@ class P123StrmHelper(_PluginBase):
                 self._scheduler = None
         except Exception as e:
             print(str(e))
+
+    def switch_account_job(self):
+        """
+        定时切换账号池账号并重启服务
+        """
+        if not self.account_pool:
+            return
+        self.current_account_index = (self.current_account_index + 1) % len(self.account_pool)
+        self._passport = self.account_pool[self.current_account_index]["passport"]
+        self._password = self.account_pool[self.current_account_index]["password"]
+        logger.info(f"【账号池】切换账号为：{self._passport}")
+        self.__update_config()
+        # 重启服务
+        self.restart_service()
+
+    def restart_service(self):
+        """
+        重启服务（重新初始化 client 并重载任务）
+        """
+        self.stop_service()
+        try:
+            self._client = P123AutoClient(self._passport, self._password)
+            logger.info(f"【账号池】账号 {self._passport} 登录成功，服务已重启")
+        except Exception as e:
+            logger.error(f"【账号池】账号 {self._passport} 登录失败: {e}")
+        # 可根据需要重新启动定时任务等
+        # 这里只做简单重启，如需更复杂可补充
