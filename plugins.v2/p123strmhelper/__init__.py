@@ -750,6 +750,7 @@ class P123StrmHelper(_PluginBase):
         """
         _mediaserver_helper = MediaServerHelper()
 
+        # 监控MP整理 tab
         transfer_monitor_tab = [
             {
                 "component": "VRow",
@@ -902,6 +903,7 @@ class P123StrmHelper(_PluginBase):
             },
         ]
 
+        # 全量同步 tab
         full_sync_tab = [
             {
                 "component": "VRow",
@@ -1006,6 +1008,7 @@ class P123StrmHelper(_PluginBase):
             },
         ]
 
+        # 分享生成STRM tab
         share_generate_tab = [
             {
                 "component": "VRow",
@@ -1126,6 +1129,7 @@ class P123StrmHelper(_PluginBase):
             },
         ]
 
+        # 定期清理 tab
         cleanup_tab = [
             {
                 "component": "VRow",
@@ -1387,34 +1391,28 @@ class P123StrmHelper(_PluginBase):
                                 "component": "VWindowItem",
                                 "props": {"value": "tab-transfer"},
                                 "content": [
-                                    {
-                                        "component": "VCardText",
-                                        "content": transfer_monitor_tab,
-                                    }
+                                    {"component": "VCardText", "content": transfer_monitor_tab},
                                 ],
                             },
                             {
                                 "component": "VWindowItem",
                                 "props": {"value": "tab-sync"},
                                 "content": [
-                                    {"component": "VCardText", "content": full_sync_tab}
+                                    {"component": "VCardText", "content": full_sync_tab},
                                 ],
                             },
                             {
                                 "component": "VWindowItem",
                                 "props": {"value": "tab-share"},
                                 "content": [
-                                    {
-                                        "component": "VCardText",
-                                        "content": share_generate_tab,
-                                    }
+                                    {"component": "VCardText", "content": share_generate_tab},
                                 ],
                             },
                             {
                                 "component": "VWindowItem",
                                 "props": {"value": "tab-cleanup"},
                                 "content": [
-                                    {"component": "VCardText", "content": cleanup_tab}
+                                    {"component": "VCardText", "content": cleanup_tab},
                                 ],
                             },
                         ],
