@@ -869,7 +869,10 @@ class P123StrmHelper(_PluginBase):
             ],
         }
 
-        # ... 其余tab和卡片定义 ...
+        # 拼接当前账号池内容用于回显
+        account_pool_str = "\n".join([
+            f"{acc['passport']}#{acc['password']}" for acc in self._account_pool
+        ])
 
         return [
             {
@@ -905,7 +908,7 @@ class P123StrmHelper(_PluginBase):
             "moviepilot_address": "",
             "user_rmt_mediaext": "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v",
             "user_download_mediaext": "srt,ssa,ass",
-            "account_pool": "",
+            "account_pool": account_pool_str,
             # ... 其余默认配置 ...
         }
 
