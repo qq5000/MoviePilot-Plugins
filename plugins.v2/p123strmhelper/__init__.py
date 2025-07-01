@@ -35,8 +35,9 @@ class MediaInfoDownloader:
     媒体信息文件下载器
     """
 
-    def __init__(self, client: P123AutoClient):
+    def __init__(self, client: P123AutoClient, plugin_ref=None):
         self.client = client
+        self.plugin_ref = plugin_ref  # 引用插件本身以便轮换账号
 
     @staticmethod
     def is_file_leq_1k(file_path):
@@ -48,21 +49,42 @@ class MediaInfoDownloader:
             return True
         return file.stat().st_size <= 1024
 
-    def get_download_url(
-        self,
-        item: Dict,
-    ):
+    def get_download_url_with_retry(self, item: Dict, max_retry: int = None):
         """
-        获取下载链接
+        获取下载链接，失败则自动轮换账号池重试
         """
-        resp = self.client.download_info(
-            item,
-            base_url="",
-            async_=False,
-            headers={"User-Agent": settings.USER_AGENT},
-        )
-        check_response(resp)
-        return resp.get("data", {}).get("DownloadUrl", None)
+        plugin = self.plugin_ref
+        if plugin and hasattr(plugin, '_account_pool') and plugin._account_pool:
+            pool_len = len(plugin._account_pool)
+        else:
+            pool_len = 1
+        if max_retry is None:
+            max_retry = pool_len
+        for attempt in range(max_retry):
+            try:
+                resp = self.client.download_info(
+                    item,
+                    base_url="",
+                    async_=False,
+                    headers={"User-Agent": settings.USER_AGENT},
+                )
+                check_response(resp)
+                logger.info(f"【账号池】账号{plugin._passport if plugin else ''}获取下载地址成功")
+                return resp.get("data", {}).get("DownloadUrl", None)
+            except Exception as e:
+                logger.warning(f"【账号池】账号{plugin._passport if plugin else ''}获取下载地址失败: {e}")
+                if plugin and plugin._account_pool and max_retry > 1:
+                    logger.info("【账号池】尝试轮换账号池账号后重试")
+                    plugin.rotate_account()
+                    self.client = plugin._client  # 更新client
+                else:
+                    break
+        logger.error("【账号池】所有账号均尝试失败，无法获取下载地址")
+        return None
+
+    def get_download_url(self, item: Dict):
+        # 兼容原有调用，直接用带重试的
+        return self.get_download_url_with_retry(item)
 
     def save_mediainfo_file(self, file_path: Path, file_name: str, download_url: str):
         """
@@ -170,7 +192,7 @@ class FullSyncStrmHelper:
         self.strm_fail_dict: Dict[str, str] = {}
         self.mediainfo_fail_dict: List = None
         self.server_address = server_address.rstrip("/")
-        self._mediainfodownloader = MediaInfoDownloader(client=self.client)
+        self._mediainfodownloader = MediaInfoDownloader(client=self.client, plugin_ref=self)
         self._storagechain = StorageChain()
         self.download_mediainfo_list = []
 
@@ -312,7 +334,7 @@ class ShareStrmHelper:
         self.share_media_path = share_media_path
         self.local_media_path = local_media_path
         self.server_address = server_address.rstrip("/")
-        self._mediainfodownloader = MediaInfoDownloader(client=self.client)
+        self._mediainfodownloader = MediaInfoDownloader(client=self.client, plugin_ref=self)
         self.download_mediainfo_list = []
 
     def has_prefix(self, full_path, prefix_path):
@@ -563,8 +585,8 @@ class P123StrmHelper(_PluginBase):
                 self._scheduler = BackgroundScheduler(timezone=settings.TZ)
             self._scheduler.add_job(
                 func=self.rotate_account,
-                trigger="interval",
-                hours=1,
+                trigger='cron',
+                minute=0,
                 name="账号池轮换"
             )
             if self._scheduler.get_jobs():
@@ -1263,7 +1285,7 @@ class P123StrmHelper(_PluginBase):
 
         try:
             _storagechain = StorageChain()
-            _mediainfodownloader = MediaInfoDownloader(client=self._client)
+            _mediainfodownloader = MediaInfoDownloader(client=self._client, plugin_ref=self)
 
             if subtitle_list:
                 logger.info("【监控整理STRM生成】开始下载字幕文件")
