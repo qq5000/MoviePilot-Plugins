@@ -474,6 +474,16 @@ class P123StrmHelper(_PluginBase):
     # 账号池相关
     _account_pool = []
     _current_account_index = 0
+    _passport = None
+    _password = None
+    _actual_account_pool = []
+
+    def get_actual_account_pool(self):
+        pool = []
+        if self._passport and self._password:
+            pool.append({"passport": self._passport, "password": self._password})
+        pool.extend(self._account_pool)
+        return pool
 
     def init_plugin(self, config: dict = None):
         """
@@ -482,6 +492,8 @@ class P123StrmHelper(_PluginBase):
         if config:
             self._enabled = config.get("enabled")
             self._once_full_sync_strm = config.get("once_full_sync_strm")
+            self._passport = config.get("passport", "")
+            self._password = config.get("password", "")
             self.moviepilot_address = config.get("moviepilot_address")
             self._user_rmt_mediaext = config.get("user_rmt_mediaext")
             self._user_download_mediaext = config.get("user_download_mediaext")
@@ -535,10 +547,11 @@ class P123StrmHelper(_PluginBase):
                 self._user_share_pan_path = "/"
             self.__update_config()
 
-        # 初始化账号池第一个账号
-        if self._account_pool:
+        # 构造实际账号池
+        self._actual_account_pool = self.get_actual_account_pool()
+        if self._actual_account_pool:
             self._current_account_index = 0
-            account = self._account_pool[self._current_account_index]
+            account = self._actual_account_pool[self._current_account_index]
             self._passport = account.get("passport", "")
             self._password = account.get("password", "")
         else:
@@ -550,11 +563,10 @@ class P123StrmHelper(_PluginBase):
         except Exception as e:
             logger.error(f"123云盘客户端创建失败: {e}")
 
-        # 停止现有任务
         self.stop_service()
 
-        # 定时账号池轮换
-        if self._enabled and self._account_pool:
+        # 定时账号池轮换（只要有2个及以上账号都轮换）
+        if self._enabled and len(self._actual_account_pool) > 1:
             if not self._scheduler:
                 self._scheduler = BackgroundScheduler(timezone=settings.TZ)
             self._scheduler.add_job(
@@ -598,20 +610,17 @@ class P123StrmHelper(_PluginBase):
                 self._scheduler.start()
 
     def rotate_account(self):
-        """
-        账号池轮换，每小时切换账号
-        """
-        if not self._account_pool:
+        self._actual_account_pool = self.get_actual_account_pool()
+        if not self._actual_account_pool or len(self._actual_account_pool) < 2:
             return
-        self._current_account_index = (self._current_account_index + 1) % len(self._account_pool)
-        account = self._account_pool[self._current_account_index]
+        self._current_account_index = (self._current_account_index + 1) % len(self._actual_account_pool)
+        account = self._actual_account_pool[self._current_account_index]
         self._passport = account.get("passport", "")
         self._password = account.get("password", "")
-        # 手机号脱敏处理
         passport_masked = self._passport
         if len(passport_masked) >= 7:
             passport_masked = f"{passport_masked[:3]}****{passport_masked[-4:]}"
-        logger.info(f"【账号池】账号轮换：当前索引 {self._current_account_index+1}/{len(self._account_pool)}，切换到账号：{passport_masked}")
+        logger.info(f"【账号池】账号轮换：当前索引 {self._current_account_index+1}/{len(self._actual_account_pool)}，切换到账号：{passport_masked}")
         try:
             self._client = P123AutoClient(self._passport, self._password)
             logger.info(f"【账号池】已切换账号：{passport_masked}")
@@ -627,6 +636,8 @@ class P123StrmHelper(_PluginBase):
             {
                 "enabled": self._enabled,
                 "once_full_sync_strm": self._once_full_sync_strm,
+                "passport": self._passport,
+                "password": self._password,
                 "moviepilot_address": self.moviepilot_address,
                 "user_rmt_mediaext": self._user_rmt_mediaext,
                 "user_download_mediaext": self._user_download_mediaext,
@@ -1219,6 +1230,32 @@ class P123StrmHelper(_PluginBase):
                             {
                                 "component": "VTextField",
                                 "props": {
+                                    "model": "passport",
+                                    "label": "手机号",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "password",
+                                    "label": "密码",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
                                     "model": "moviepilot_address",
                                     "label": "MoviePilot 内网访问地址",
                                 },
@@ -1422,6 +1459,8 @@ class P123StrmHelper(_PluginBase):
         ], {
             "enabled": False,
             "once_full_sync_strm": False,
+            "passport": "",
+            "password": "",
             "moviepilot_address": "",
             "user_rmt_mediaext": "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v",
             "user_download_mediaext": "srt,ssa,ass",
