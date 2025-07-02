@@ -650,18 +650,22 @@ class P123StrmHelper(_PluginBase):
         self.__update_config()
 
     def log_rotate_countdown(self):
-        from datetime import datetime, timedelta
-        import pytz
-        now = datetime.now(pytz.timezone(settings.TZ))
-        # 计算下一个半点
-        next_half_hour = now.replace(second=0, microsecond=0)
-        if now.minute < 30:
-            next_half_hour = next_half_hour.replace(minute=30)
-        else:
-            # 到下一个小时的30分
-            next_half_hour = (next_half_hour + timedelta(hours=1)).replace(minute=30)
-        minutes_left = int((next_half_hour - now).total_seconds() // 60)
-        logger.info(f"【账号池】距离下次账号自动轮换还有 {minutes_left} 分钟")
+        try:
+            logger.info("log_rotate_countdown called")  # 调试用
+            from datetime import datetime, timedelta
+            import pytz
+            now = datetime.now(pytz.timezone(settings.TZ))
+            # 计算下一个半点
+            next_half_hour = now.replace(second=0, microsecond=0)
+            if now.minute < 30:
+                next_half_hour = next_half_hour.replace(minute=30)
+            else:
+                # 到下一个小时的30分
+                next_half_hour = (next_half_hour + timedelta(hours=1)).replace(minute=30)
+            minutes_left = int((next_half_hour - now).total_seconds() // 60)
+            logger.info(f"【账号池】距离下次账号自动轮换还有 {minutes_left} 分钟")
+        except Exception as e:
+            logger.error(f"log_rotate_countdown error: {e}")
 
     def get_state(self) -> bool:
         return self._enabled
