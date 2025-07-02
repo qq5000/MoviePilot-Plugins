@@ -596,6 +596,14 @@ class P123StrmHelper(_PluginBase):
                 minute='*',
                 name="账号池轮换倒计时"
             )
+            # 新增：每天0点清理日志
+            self._scheduler.add_job(
+                func=self.clean_logs,
+                trigger='cron',
+                hour=0,
+                minute=0,
+                name="日志清理"
+            )
             if self._scheduler.get_jobs():
                 self._scheduler.print_jobs()
                 self._scheduler.start()
@@ -1564,3 +1572,11 @@ class P123StrmHelper(_PluginBase):
         """
         self.rotate_account()
         return JSONResponse({"state": True, "message": "账号已切换"})
+
+    def clean_logs(self):
+        try:
+            # 这里可以根据实际日志路径进行清理，如删除日志文件或只输出提示
+            # 示例：仅输出日志清理提示
+            logger.info("【日志清理】每天0点定时清理日志（请根据实际需求实现日志文件删除）")
+        except Exception as e:
+            logger.error(f"【日志清理】清理日志时出错: {e}")
