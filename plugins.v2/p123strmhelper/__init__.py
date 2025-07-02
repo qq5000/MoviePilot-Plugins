@@ -589,6 +589,13 @@ class P123StrmHelper(_PluginBase):
                 minute=30,
                 name="账号池轮换"
             )
+            # 新增：每分钟输出倒计时日志
+            self._scheduler.add_job(
+                func=self.log_rotate_countdown,
+                trigger='cron',
+                minute='*',
+                name="账号池轮换倒计时"
+            )
             if self._scheduler.get_jobs():
                 self._scheduler.print_jobs()
                 self._scheduler.start()
@@ -641,6 +648,20 @@ class P123StrmHelper(_PluginBase):
         except Exception as e:
             logger.error(f"【账号池】切换账号时重建 client 失败: {e}")
         self.__update_config()
+
+    def log_rotate_countdown(self):
+        from datetime import datetime, timedelta
+        import pytz
+        now = datetime.now(pytz.timezone(settings.TZ))
+        # 计算下一个半点
+        next_half_hour = now.replace(second=0, microsecond=0)
+        if now.minute < 30:
+            next_half_hour = next_half_hour.replace(minute=30)
+        else:
+            # 到下一个小时的30分
+            next_half_hour = (next_half_hour + timedelta(hours=1)).replace(minute=30)
+        minutes_left = int((next_half_hour - now).total_seconds() // 60)
+        logger.info(f"【账号池】距离下次账号自动轮换还有 {minutes_left} 分钟")
 
     def get_state(self) -> bool:
         return self._enabled
