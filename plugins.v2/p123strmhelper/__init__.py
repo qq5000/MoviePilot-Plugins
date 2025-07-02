@@ -627,11 +627,6 @@ class P123StrmHelper(_PluginBase):
         if not self._account_pool:
             return
         old_index = self._current_account_index
-        old_account = self._account_pool[old_index]
-        old_passport = old_account.get("passport", "")
-        old_passport_masked = old_passport
-        if len(old_passport_masked) >= 7:
-            old_passport_masked = f"{old_passport_masked[:3]}****{old_passport_masked[-4:]}"
         self._current_account_index = (self._current_account_index + 1) % len(self._account_pool)
         account = self._account_pool[self._current_account_index]
         self._passport = account.get("passport", "")
@@ -639,8 +634,7 @@ class P123StrmHelper(_PluginBase):
         passport_masked = self._passport
         if len(passport_masked) >= 7:
             passport_masked = f"{passport_masked[:3]}****{passport_masked[-4:]}"
-        logger.info(f"【账号池】账号轮换：从索引 {old_index+1}/{len(self._account_pool)}（{old_passport_masked}）切换到 {self._current_account_index+1}/{len(self._account_pool)}（{passport_masked}）")
-        # 自动重建 client
+        logger.info(f"【账号池】账号轮换：切换到 {self._current_account_index+1}/{len(self._account_pool)}（{passport_masked}）")
         try:
             self._client = P123AutoClient(self._passport, self._password)
             logger.info(f"【账号池】已切换账号并重建 client：{passport_masked}")
