@@ -938,10 +938,7 @@ class P123StrmHelper(_PluginBase):
         pass
 
     def __update_config(self):
-        account_pool_str = "\n".join([
-            f"{acc['passport']}#{acc['password']}" for acc in self._account_pool
-        ])
-        self._account_pool_raw = account_pool_str
+        # 账号池原始字符串直接保存
         self.update_config({
             "enabled": self._enabled,
             "once_full_sync_strm": self._once_full_sync_strm,
@@ -969,6 +966,7 @@ class P123StrmHelper(_PluginBase):
             "clear_recyclebin_enabled": self._clear_recyclebin_enabled,
             "clear_receive_path_enabled": self._clear_receive_path_enabled,
             "cron_clear": self._cron_clear,
+            "account_pool": self._account_pool_raw,
         })
 
     @staticmethod
