@@ -586,7 +586,7 @@ class P123StrmHelper(_PluginBase):
             self._scheduler.add_job(
                 func=self.rotate_account,
                 trigger='cron',
-                minute=30,
+                minute='0,30',
                 name="账号池轮换"
             )
             # 新增：每分钟输出倒计时日志
