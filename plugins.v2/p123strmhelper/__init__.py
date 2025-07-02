@@ -586,7 +586,7 @@ class P123StrmHelper(_PluginBase):
             self._scheduler.add_job(
                 func=self.rotate_account,
                 trigger='cron',
-                minute=0,
+                minute=30,
                 name="账号池轮换"
             )
             if self._scheduler.get_jobs():
@@ -702,13 +702,6 @@ class P123StrmHelper(_PluginBase):
                 "methods": ["GET", "POST", "HEAD"],
                 "summary": "302跳转",
                 "description": "123云盘302跳转",
-            },
-            {
-                "path": "/rotate_account",
-                "endpoint": self.api_rotate_account,
-                "methods": ["POST"],
-                "summary": "手动切换账号池账号",
-                "description": "手动切换账号池账号，切换后自动重建client。",
             },
         ]
 
@@ -840,27 +833,6 @@ class P123StrmHelper(_PluginBase):
                                     "model": "user_download_mediaext",
                                     "label": "可下载媒体数据文件扩展名",
                                 },
-                            }
-                        ],
-                    }
-                ],
-            },
-            {
-                "component": "VRow",
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12},
-                        "content": [
-                            {
-                                "component": "VBtn",
-                                "props": {
-                                    "color": "primary",
-                                    "block": True,
-                                    "class": "mt-2",
-                                    "action": "rotate_account",
-                                },
-                                "content": "手动切换账号池账号"
                             }
                         ],
                     }
@@ -1537,10 +1509,3 @@ class P123StrmHelper(_PluginBase):
                 self._scheduler = None
         except Exception as e:
             print(str(e))
-
-    def api_rotate_account(self, request: Request):
-        """
-        手动切换账号池账号API
-        """
-        self.rotate_account()
-        return JSONResponse({"state": True, "message": "账号已切换"})
