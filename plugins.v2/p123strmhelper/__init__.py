@@ -640,13 +640,13 @@ class P123StrmHelper(_PluginBase):
         if len(passport_masked) >= 7:
             passport_masked = f"{passport_masked[:3]}****{passport_masked[-4:]}"
         logger.info(f"【账号池】账号轮换：从索引 {old_index+1}/{len(self._account_pool)}（{old_passport_masked}）切换到 {self._current_account_index+1}/{len(self._account_pool)}（{passport_masked}）")
+        # 自动重建 client
         try:
             self._client = P123AutoClient(self._passport, self._password)
-            logger.info(f"【账号池】已切换账号：{passport_masked}，插件即将重启以生效新账号")
-            # 重启插件（重新初始化）
-            self.init_plugin(self.get_config())
+            logger.info(f"【账号池】已切换账号并重建 client：{passport_masked}")
         except Exception as e:
-            logger.error(f"【账号池】切换账号失败: {e}")
+            logger.error(f"【账号池】切换账号时重建 client 失败: {e}")
+        self.__update_config()
 
     def get_state(self) -> bool:
         return self._enabled
@@ -702,7 +702,14 @@ class P123StrmHelper(_PluginBase):
                 "methods": ["GET", "POST", "HEAD"],
                 "summary": "302跳转",
                 "description": "123云盘302跳转",
-            }
+            },
+            {
+                "path": "/rotate_account",
+                "endpoint": self.api_rotate_account,
+                "methods": ["POST"],
+                "summary": "手动切换账号池账号",
+                "description": "手动切换账号池账号，切换后自动重建client。",
+            },
         ]
 
     def get_service(self) -> List[Dict[str, Any]]:
@@ -833,6 +840,27 @@ class P123StrmHelper(_PluginBase):
                                     "model": "user_download_mediaext",
                                     "label": "可下载媒体数据文件扩展名",
                                 },
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VBtn",
+                                "props": {
+                                    "color": "primary",
+                                    "block": True,
+                                    "class": "mt-2",
+                                    "action": "rotate_account",
+                                },
+                                "content": "手动切换账号池账号"
                             }
                         ],
                     }
@@ -1509,3 +1537,10 @@ class P123StrmHelper(_PluginBase):
                 self._scheduler = None
         except Exception as e:
             print(str(e))
+
+    def api_rotate_account(self, request: Request):
+        """
+        手动切换账号池账号API
+        """
+        self.rotate_account()
+        return JSONResponse({"state": True, "message": "账号已切换"})
