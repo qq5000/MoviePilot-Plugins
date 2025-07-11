@@ -367,9 +367,8 @@ class IncrementSyncStrmHelper:
                     f"【增量STRM生成】错误的 pickcode 值 {pickcode}，无法生成 STRM 文件"
                 )
                 return
-            strm_url = f"{self.server_address}/api/v1/plugin/P115StrmHelper/redirect_url?apikey={settings.API_TOKEN}&pickcode={pickcode}"
-            if self.strm_url_format == "pickname":
-                strm_url += f"&file_name={pan_path.name}"
+            # 生成新的strm URL格式: http://192.168.124.59:5677/s/pickcode?/filename
+            strm_url = f"{self.server_address}/s/{pickcode}?/{pan_path.name}"
 
             with open(new_file_path, "w", encoding="utf-8") as file:
                 file.write(strm_url)
@@ -722,9 +721,8 @@ class FullSyncStrmHelper:
                                     f"【全量STRM生成】错误的 pickcode 值 {pickcode}，无法生成 STRM 文件"
                                 )
                                 continue
-                            strm_url = f"{self.server_address}/api/v1/plugin/P115StrmHelper/redirect_url?apikey={settings.API_TOKEN}&pickcode={pickcode}"
-                            if self.strm_url_format == "pickname":
-                                strm_url += f"&file_name={original_file_name}"
+                            # 生成新的strm URL格式: http://192.168.124.59:5677/s/pickcode?/filename
+                            strm_url = f"{self.server_address}/s/{pickcode}?/{original_file_name}"
 
                             with open(new_file_path, "w", encoding="utf-8") as file:
                                 file.write(strm_url)
@@ -913,9 +911,8 @@ class ShareStrmHelper:
                 self.strm_fail_dict[str(new_file_path)] = "不存在 receive_code 值"
                 self.strm_fail_count += 1
                 return
-            strm_url = f"{self.server_address}/api/v1/plugin/P115StrmHelper/redirect_url?apikey={settings.API_TOKEN}&share_code={share_code}&receive_code={receive_code}&id={file_id}"
-            if self.strm_url_format == "pickname":
-                strm_url += f"&file_name={pan_file_name}"
+            # 生成新的strm URL格式: http://192.168.124.59:5677/s/share_code_receive_code_file_id?/filename
+            strm_url = f"{self.server_address}/s/{share_code}_{receive_code}_{file_id}?/{pan_file_name}"
 
             with open(new_file_path, "w", encoding="utf-8") as file:
                 file.write(strm_url)

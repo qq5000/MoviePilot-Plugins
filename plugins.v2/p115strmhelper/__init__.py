@@ -496,6 +496,13 @@ class P115StrmHelper(_PluginBase):
                 "description": "115网盘302跳转",
             },
             {
+                "path": "/s/{share_code}",
+                "endpoint": self._stream_url,
+                "methods": ["GET", "POST", "HEAD"],
+                "summary": "流媒体URL",
+                "description": "115网盘流媒体URL",
+            },
+            {
                 "path": "/add_transfer_share",
                 "endpoint": self.add_transfer_share,
                 "methods": ["GET"],
@@ -1095,9 +1102,8 @@ class P115StrmHelper(_PluginBase):
                 f"【监控整理STRM生成】错误的 pickcode 值 {item_dest_name}，无法生成 STRM 文件"
             )
             return
-        strm_url = f"{configer.get_config('moviepilot_address').rstrip('/')}/api/v1/plugin/P115StrmHelper/redirect_url?apikey={settings.API_TOKEN}&pickcode={item_dest_pickcode}"
-        if configer.get_config("strm_url_format") == "pickname":
-            strm_url += f"&file_name={item_dest_name}"
+        # 生成新的strm URL格式: http://192.168.124.59:5677/s/pickcode?/filename
+        strm_url = f"{configer.get_config('moviepilot_address').rstrip('/')}/s/{item_dest_pickcode}?/{item_dest_name}"
 
         _databasehelper = FileDbHelper()
         _databasehelper.upsert_batch(
@@ -2310,9 +2316,8 @@ class P115StrmHelper(_PluginBase):
                                     f"【监控生活事件】错误的 pickcode 值 {pickcode}，无法生成 STRM 文件"
                                 )
                                 continue
-                            strm_url = f"{configer.get_config('moviepilot_address').rstrip('/')}/api/v1/plugin/P115StrmHelper/redirect_url?apikey={settings.API_TOKEN}&pickcode={pickcode}"
-                            if configer.get_config("strm_url_format") == "pickname":
-                                strm_url += f"&file_name={original_file_name}"
+                            # 生成新的strm URL格式: http://192.168.124.59:5677/s/pickcode?/filename
+                            strm_url = f"{configer.get_config('moviepilot_address').rstrip('/')}/s/{pickcode}?/{original_file_name}"
 
                             with open(new_file_path, "w", encoding="utf-8") as file:
                                 file.write(strm_url)
@@ -2428,9 +2433,8 @@ class P115StrmHelper(_PluginBase):
                             f"【监控生活事件】错误的 pickcode 值 {pickcode}，无法生成 STRM 文件"
                         )
                         return
-                    strm_url = f"{configer.get_config('moviepilot_address').rstrip('/')}/api/v1/plugin/P115StrmHelper/redirect_url?apikey={settings.API_TOKEN}&pickcode={pickcode}"
-                    if configer.get_config("strm_url_format") == "pickname":
-                        strm_url += f"&file_name={original_file_name}"
+                    # 生成新的strm URL格式: http://192.168.124.59:5677/s/pickcode?/filename
+                    strm_url = f"{configer.get_config('moviepilot_address').rstrip('/')}/s/{pickcode}?/{original_file_name}"
 
                     with open(new_file_path, "w", encoding="utf-8") as file:
                         file.write(strm_url)
@@ -3517,3 +3521,164 @@ class P115StrmHelper(_PluginBase):
             media_type="application/json; charset=utf-8",
             content=dumps({"status": "redirecting", "url": url}),
         )
+
+    def _stream_url(self, request: Request, share_code: str):
+        """
+        处理新的流媒体URL格式: /s/pickcode?/filename
+        """
+        # 从查询参数中获取文件名
+        file_name = request.query_params.get("", "")
+        if not file_name:
+            return "Missing filename parameter"
+        
+        # 解析share_code，可能包含pickcode或者share_code_receive_code_file_id
+        if "_" in share_code:
+            # 分享文件格式: share_code_receive_code_file_id
+            parts = share_code.split("_", 2)
+            if len(parts) == 3:
+                share_code_part, receive_code, file_id = parts
+                # 调用原有的分享下载逻辑
+                try:
+                    url = self._get_share_downurl(share_code_part, receive_code, int(file_id))
+                    return Response(
+                        status_code=302,
+                        headers={
+                            "Location": url,
+                            "Content-Disposition": f'attachment; filename="{quote(file_name)}"',
+                        },
+                        media_type="application/json; charset=utf-8",
+                        content=dumps({"status": "redirecting", "url": url}),
+                    )
+                except Exception as e:
+                    logger.error(f"【流媒体URL】获取分享下载地址失败: {e}")
+                    return f"获取分享下载地址失败: {e}"
+            else:
+                return f"Invalid share_code format: {share_code}"
+        else:
+            # pickcode格式
+            pickcode = share_code
+            if not (len(pickcode) == 17 and pickcode.isalnum()):
+                return f"Bad pickcode: {pickcode}"
+            
+            user_agent = request.headers.get("User-Agent") or ""
+            try:
+                if configer.get_config("link_redirect_mode") == "cookie":
+                    url = self._get_downurl(pickcode.lower(), user_agent)
+                else:
+                    resp_url = self.u115openhelper.get_download_url(
+                        pickcode=pickcode.lower(), user_agent=user_agent
+                    )
+                    data: Dict = {}
+                    data["file_name"] = file_name
+                    url = Url.of(resp_url, data)
+                
+                return Response(
+                    status_code=302,
+                    headers={
+                        "Location": url,
+                        "Content-Disposition": f'attachment; filename="{quote(file_name)}"',
+                    },
+                    media_type="application/json; charset=utf-8",
+                    content=dumps({"status": "redirecting", "url": url}),
+                )
+            except Exception as e:
+                logger.error(f"【流媒体URL】获取下载地址失败: {e}")
+                return f"获取下载地址失败: {e}"
+
+    def _get_downurl(self, pickcode: str, user_agent: str = "", app: str = "android") -> Url:
+        """
+        获取下载链接的辅助方法
+        """
+        if app == "chrome":
+            resp = requests.post(
+                "http://proapi.115.com/app/chrome/downurl",
+                data={
+                    "data": encrypt(f'{{"pickcode":"{pickcode}"}}').decode("utf-8")
+                },
+                headers={
+                    "User-Agent": user_agent,
+                    "Cookie": configer.get_config("cookies"),
+                },
+            )
+        else:
+            resp = requests.post(
+                f"http://proapi.115.com/{app or 'android'}/2.0/ufile/download",
+                data={
+                    "data": encrypt(f'{{"pick_code":"{pickcode}"}}').decode("utf-8")
+                },
+                headers={
+                    "User-Agent": user_agent,
+                    "Cookie": configer.get_config("cookies"),
+                },
+            )
+        check_response(resp)
+        json = loads(cast(bytes, resp.content))
+        if not json["state"]:
+            raise OSError(EIO, json)
+        data = json["data"] = loads(decrypt(json["data"]))
+        if app == "chrome":
+            info = next(iter(data.values()))
+            url_info = info["url"]
+            if not url_info:
+                raise FileNotFoundError(ENOENT, dumps(json).decode("utf-8"))
+            url = Url.of(url_info["url"], info)
+        else:
+            data["file_name"] = unquote(
+                urlsplit(data["url"]).path.rpartition("/")[-1]
+            )
+            url = Url.of(data["url"], data)
+        return url
+
+    def _get_share_downurl(self, share_code: str, receive_code: str, file_id: int, app: str = "") -> Url:
+        """
+        获取分享下载链接的辅助方法
+        """
+        payload = {
+            "share_code": share_code,
+            "receive_code": receive_code,
+            "file_id": file_id,
+        }
+        if app:
+            resp = requests.get(
+                f"http://proapi.115.com/{app}/2.0/share/downurl?{urlencode(payload)}",
+                headers={"Cookie": configer.get_config("cookies")},
+            )
+        else:
+            resp = requests.post(
+                "http://proapi.115.com/app/share/downurl",
+                data={"data": encrypt(dumps(payload)).decode("utf-8")},
+                headers={"Cookie": configer.get_config("cookies")},
+            )
+        check_response(resp)
+        json = loads(cast(bytes, resp.content))
+        if not json["state"]:
+            if json.get("errno") == 4100008:
+                receive_code = self._get_receive_code(share_code)
+                return self._get_share_downurl(share_code, receive_code, file_id, app=app)
+            raise OSError(EIO, json)
+        if app:
+            data = json["data"]
+        else:
+            data = json["data"] = loads(decrypt(json["data"]))
+        if not (data and (url_info := data["url"])):
+            raise FileNotFoundError(ENOENT, json)
+        data["file_id"] = data.pop("fid")
+        data["file_name"] = data.pop("fn")
+        data["file_size"] = int(data.pop("fs"))
+        url = Url.of(url_info["url"], data)
+        return url
+
+    def _get_receive_code(self, share_code: str) -> str:
+        """
+        获取接收码的辅助方法
+        """
+        resp = requests.get(
+            f"http://web.api.115.com/share/shareinfo?share_code={share_code}",
+            headers={"Cookie": configer.get_config("cookies")},
+        )
+        check_response(resp)
+        json = loads(cast(bytes, resp.content))
+        if not json["state"]:
+            raise FileNotFoundError(ENOENT, json)
+        receive_code = json["data"]["receive_code"]
+        return receive_code
