@@ -551,6 +551,13 @@ class P115StrmHelper(_PluginBase):
                 "summary": "执行分享同步",
             },
             {
+                "path": "/convert_strm_format",
+                "endpoint": self._convert_strm_format_api,
+                "methods": ["POST"],
+                "auth": "bear",
+                "summary": "转换已存在的STRM文件格式",
+            },
+            {
                 "path": "/browse_dir",
                 "endpoint": self._browse_dir_api,
                 "methods": ["GET"],
@@ -1104,6 +1111,7 @@ class P115StrmHelper(_PluginBase):
             return
         # 生成新的strm URL格式: http://192.168.124.59:5677/s/pickcode?/filename
         strm_url = f"{configer.get_config('moviepilot_address').rstrip('/')}/s/{item_dest_pickcode}?/{item_dest_name}"
+        strm_url = self.__replace_strm_url_format(strm_url)
 
         _databasehelper = FileDbHelper()
         _databasehelper.upsert_batch(
@@ -2318,6 +2326,7 @@ class P115StrmHelper(_PluginBase):
                                 continue
                             # 生成新的strm URL格式: http://192.168.124.59:5677/s/pickcode?/filename
                             strm_url = f"{configer.get_config('moviepilot_address').rstrip('/')}/s/{pickcode}?/{original_file_name}"
+                            strm_url = self.__replace_strm_url_format(strm_url)
 
                             with open(new_file_path, "w", encoding="utf-8") as file:
                                 file.write(strm_url)
@@ -2435,6 +2444,7 @@ class P115StrmHelper(_PluginBase):
                         return
                     # 生成新的strm URL格式: http://192.168.124.59:5677/s/pickcode?/filename
                     strm_url = f"{configer.get_config('moviepilot_address').rstrip('/')}/s/{pickcode}?/{original_file_name}"
+                    strm_url = self.__replace_strm_url_format(strm_url)
 
                     with open(new_file_path, "w", encoding="utf-8") as file:
                         file.write(strm_url)
@@ -3682,3 +3692,97 @@ class P115StrmHelper(_PluginBase):
             raise FileNotFoundError(ENOENT, json)
         receive_code = json["data"]["receive_code"]
         return receive_code
+
+    def __replace_strm_url_format(self, strm_url: str) -> str:
+        """
+        替换 STRM URL 格式
+        """
+        import re
+        
+        # 匹配旧格式: http://192.168.124.59:5677/api/v1/plugin/P115StrmHelper/redirect_url?apikey=xxx&pickcode=xxx
+        old_pattern = re.compile(r"http://[^/]+/api/v1/plugin/P115StrmHelper/redirect_url\?apikey=[^&]+&pickcode=([^&]+)(?:&file_name=([^&]+))?")
+        old_match = old_pattern.match(strm_url)
+        if old_match:
+            pickcode = old_match.group(1)
+            filename = old_match.group(2) or "unknown"
+            return f"{configer.get_config('moviepilot_address').rstrip('/')}/s/{pickcode}?/{filename}"
+        
+        # 匹配旧格式: http://192.168.124.59:5677/api/v1/plugin/P115StrmHelper/redirect_url?apikey=xxx&share_code=xxx&receive_code=xxx&id=xxx
+        old_share_pattern = re.compile(r"http://[^/]+/api/v1/plugin/P115StrmHelper/redirect_url\?apikey=[^&]+&share_code=([^&]+)&receive_code=([^&]+)&id=([^&]+)(?:&file_name=([^&]+))?")
+        old_share_match = old_share_pattern.match(strm_url)
+        if old_share_match:
+            share_code = old_share_match.group(1)
+            receive_code = old_share_match.group(2)
+            file_id = old_share_match.group(3)
+            filename = old_share_match.group(4) or "unknown"
+            return f"{configer.get_config('moviepilot_address').rstrip('/')}/s/{share_code}_{receive_code}_{file_id}?/{filename}"
+        
+        return strm_url
+
+    def _convert_strm_format_api(self) -> Dict:
+        """
+        转换已存在的STRM文件格式
+        """
+        try:
+            if not configer.get_config("enabled"):
+                return {"code": 1, "msg": "插件未启用"}
+
+            # 获取配置的本地媒体库路径
+            local_paths = []
+            
+            # 从全量同步配置获取路径
+            if configer.get_config("full_sync_strm_paths"):
+                for path in configer.get_config("full_sync_strm_paths").split("\n"):
+                    if path and "#" in path:
+                        local_path = path.split("#")[0].strip()
+                        if local_path:
+                            local_paths.append(local_path)
+            
+            # 从增量同步配置获取路径
+            if configer.get_config("increment_sync_strm_paths"):
+                for path in configer.get_config("increment_sync_strm_paths").split("\n"):
+                    if path and "#" in path:
+                        local_path = path.split("#")[0].strip()
+                        if local_path:
+                            local_paths.append(local_path)
+            
+            # 从分享配置获取路径
+            if configer.get_config("user_share_local_path"):
+                local_paths.append(configer.get_config("user_share_local_path"))
+            
+            if not local_paths:
+                return {"code": 1, "msg": "未找到配置的本地媒体库路径"}
+            
+            server_address = configer.get_config("moviepilot_address")
+            if not server_address:
+                return {"code": 1, "msg": "未配置MoviePilot地址"}
+            
+            total_converted = 0
+            total_errors = 0
+            
+            # 导入转换函数
+            from .helper.strm import convert_existing_strm_files
+            
+            # 对每个路径进行转换
+            for local_path in local_paths:
+                try:
+                    converted, errors = convert_existing_strm_files(local_path, server_address)
+                    if converted is not None:
+                        total_converted += converted
+                        total_errors += errors
+                except Exception as e:
+                    logger.error(f"转换路径失败: {local_path}, 错误: {e}")
+                    total_errors += 1
+            
+            return {
+                "code": 0, 
+                "msg": f"STRM格式转换完成: 成功转换 {total_converted} 个文件, 失败 {total_errors} 个文件",
+                "data": {
+                    "converted": total_converted,
+                    "errors": total_errors
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"转换STRM格式失败: {e}")
+            return {"code": 1, "msg": f"转换STRM格式失败: {str(e)}"}

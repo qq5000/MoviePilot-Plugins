@@ -1,6 +1,7 @@
 import time
 import threading
 import shutil
+import re
 from typing import List, Dict, Optional
 from pathlib import Path
 from itertools import batched
@@ -82,6 +83,30 @@ class IncrementSyncStrmHelper:
         self.local_tree = temp_path / "increment_local_tree.txt"
         self.pan_tree = temp_path / "increment_pan_tree.txt"
         self.pan_to_local_tree = temp_path / "increment_pan_to_local_tree.txt"
+
+    def __replace_strm_url_format(self, strm_url: str) -> str:
+        """
+        替换 STRM URL 格式
+        """
+        # 匹配旧格式: http://192.168.124.59:5677/api/v1/plugin/P115StrmHelper/redirect_url?apikey=xxx&pickcode=xxx
+        old_pattern = re.compile(r"http://[^/]+/api/v1/plugin/P115StrmHelper/redirect_url\?apikey=[^&]+&pickcode=([^&]+)(?:&file_name=([^&]+))?")
+        old_match = old_pattern.match(strm_url)
+        if old_match:
+            pickcode = old_match.group(1)
+            filename = old_match.group(2) or "unknown"
+            return f"{self.server_address}/s/{pickcode}?/{filename}"
+        
+        # 匹配旧格式: http://192.168.124.59:5677/api/v1/plugin/P115StrmHelper/redirect_url?apikey=xxx&share_code=xxx&receive_code=xxx&id=xxx
+        old_share_pattern = re.compile(r"http://[^/]+/api/v1/plugin/P115StrmHelper/redirect_url\?apikey=[^&]+&share_code=([^&]+)&receive_code=([^&]+)&id=([^&]+)(?:&file_name=([^&]+))?")
+        old_share_match = old_share_pattern.match(strm_url)
+        if old_share_match:
+            share_code = old_share_match.group(1)
+            receive_code = old_share_match.group(2)
+            file_id = old_share_match.group(3)
+            filename = old_share_match.group(4) or "unknown"
+            return f"{self.server_address}/s/{share_code}_{receive_code}_{file_id}?/{filename}"
+        
+        return strm_url
 
     def __itertree(self, pan_path: str, local_path: str):
         """
@@ -369,6 +394,7 @@ class IncrementSyncStrmHelper:
                 return
             # 生成新的strm URL格式: http://192.168.124.59:5677/s/pickcode?/filename
             strm_url = f"{self.server_address}/s/{pickcode}?/{pan_path.name}"
+            strm_url = self.__replace_strm_url_format(strm_url)
 
             with open(new_file_path, "w", encoding="utf-8") as file:
                 file.write(strm_url)
@@ -537,6 +563,30 @@ class FullSyncStrmHelper:
         temp_path = settings.PLUGIN_DATA_PATH / "p115strmhelper" / "temp"
         self.local_tree = temp_path / "local_tree.txt"
         self.pan_tree = temp_path / "pan_tree.txt"
+
+    def __replace_strm_url_format(self, strm_url: str) -> str:
+        """
+        替换 STRM URL 格式
+        """
+        # 匹配旧格式: http://192.168.124.59:5677/api/v1/plugin/P115StrmHelper/redirect_url?apikey=xxx&pickcode=xxx
+        old_pattern = re.compile(r"http://[^/]+/api/v1/plugin/P115StrmHelper/redirect_url\?apikey=[^&]+&pickcode=([^&]+)(?:&file_name=([^&]+))?")
+        old_match = old_pattern.match(strm_url)
+        if old_match:
+            pickcode = old_match.group(1)
+            filename = old_match.group(2) or "unknown"
+            return f"{self.server_address}/s/{pickcode}?/{filename}"
+        
+        # 匹配旧格式: http://192.168.124.59:5677/api/v1/plugin/P115StrmHelper/redirect_url?apikey=xxx&share_code=xxx&receive_code=xxx&id=xxx
+        old_share_pattern = re.compile(r"http://[^/]+/api/v1/plugin/P115StrmHelper/redirect_url\?apikey=[^&]+&share_code=([^&]+)&receive_code=([^&]+)&id=([^&]+)(?:&file_name=([^&]+))?")
+        old_share_match = old_share_pattern.match(strm_url)
+        if old_share_match:
+            share_code = old_share_match.group(1)
+            receive_code = old_share_match.group(2)
+            file_id = old_share_match.group(3)
+            filename = old_share_match.group(4) or "unknown"
+            return f"{self.server_address}/s/{share_code}_{receive_code}_{file_id}?/{filename}"
+        
+        return strm_url
 
     @staticmethod
     def __remove_parent_dir(file_path: Path):
@@ -723,6 +773,7 @@ class FullSyncStrmHelper:
                                 continue
                             # 生成新的strm URL格式: http://192.168.124.59:5677/s/pickcode?/filename
                             strm_url = f"{self.server_address}/s/{pickcode}?/{original_file_name}"
+                            strm_url = self.__replace_strm_url_format(strm_url)
 
                             with open(new_file_path, "w", encoding="utf-8") as file:
                                 file.write(strm_url)
@@ -843,6 +894,30 @@ class ShareStrmHelper:
         self.mediainfodownloader = mediainfodownloader
         self.download_mediainfo_list = []
 
+    def __replace_strm_url_format(self, strm_url: str) -> str:
+        """
+        替换 STRM URL 格式
+        """
+        # 匹配旧格式: http://192.168.124.59:5677/api/v1/plugin/P115StrmHelper/redirect_url?apikey=xxx&pickcode=xxx
+        old_pattern = re.compile(r"http://[^/]+/api/v1/plugin/P115StrmHelper/redirect_url\?apikey=[^&]+&pickcode=([^&]+)(?:&file_name=([^&]+))?")
+        old_match = old_pattern.match(strm_url)
+        if old_match:
+            pickcode = old_match.group(1)
+            filename = old_match.group(2) or "unknown"
+            return f"{self.server_address}/s/{pickcode}?/{filename}"
+        
+        # 匹配旧格式: http://192.168.124.59:5677/api/v1/plugin/P115StrmHelper/redirect_url?apikey=xxx&share_code=xxx&receive_code=xxx&id=xxx
+        old_share_pattern = re.compile(r"http://[^/]+/api/v1/plugin/P115StrmHelper/redirect_url\?apikey=[^&]+&share_code=([^&]+)&receive_code=([^&]+)&id=([^&]+)(?:&file_name=([^&]+))?")
+        old_share_match = old_share_pattern.match(strm_url)
+        if old_share_match:
+            share_code = old_share_match.group(1)
+            receive_code = old_share_match.group(2)
+            file_id = old_share_match.group(3)
+            filename = old_share_match.group(4) or "unknown"
+            return f"{self.server_address}/s/{share_code}_{receive_code}_{file_id}?/{filename}"
+        
+        return strm_url
+
     def generate_strm_files(
         self,
         share_code: str,
@@ -913,6 +988,7 @@ class ShareStrmHelper:
                 return
             # 生成新的strm URL格式: http://192.168.124.59:5677/s/share_code_receive_code_file_id?/filename
             strm_url = f"{self.server_address}/s/{share_code}_{receive_code}_{file_id}?/{pan_file_name}"
+            strm_url = self.__replace_strm_url_format(strm_url)
 
             with open(new_file_path, "w", encoding="utf-8") as file:
                 file.write(strm_url)
@@ -999,3 +1075,72 @@ class ShareStrmHelper:
             self.strm_fail_count,
             self.mediainfo_fail_count,
         )
+
+
+def convert_existing_strm_files(strm_directory: str, server_address: str):
+    """
+    转换已存在的 STRM 文件格式
+    将旧格式的 strm 文件转换为新格式
+    
+    Args:
+        strm_directory: strm 文件所在目录
+        server_address: 服务器地址
+    """
+    import re
+    from pathlib import Path
+    
+    strm_dir = Path(strm_directory)
+    if not strm_dir.exists():
+        logger.error(f"目录不存在: {strm_directory}")
+        return
+    
+    converted_count = 0
+    error_count = 0
+    
+    # 遍历所有 .strm 文件
+    for strm_file in strm_dir.rglob("*.strm"):
+        try:
+            # 读取文件内容
+            with open(strm_file, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            
+            # 匹配旧格式: http://192.168.124.59:5677/api/v1/plugin/P115StrmHelper/redirect_url?apikey=xxx&pickcode=xxx
+            old_pattern = re.compile(r"http://[^/]+/api/v1/plugin/P115StrmHelper/redirect_url\?apikey=[^&]+&pickcode=([^&]+)(?:&file_name=([^&]+))?")
+            old_match = old_pattern.match(content)
+            if old_match:
+                pickcode = old_match.group(1)
+                filename = old_match.group(2) or strm_file.stem
+                new_content = f"{server_address.rstrip('/')}/s/{pickcode}?/{filename}"
+                
+                # 写回文件
+                with open(strm_file, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                
+                converted_count += 1
+                logger.info(f"转换文件: {strm_file} -> {new_content}")
+                continue
+            
+            # 匹配旧格式: http://192.168.124.59:5677/api/v1/plugin/P115StrmHelper/redirect_url?apikey=xxx&share_code=xxx&receive_code=xxx&id=xxx
+            old_share_pattern = re.compile(r"http://[^/]+/api/v1/plugin/P115StrmHelper/redirect_url\?apikey=[^&]+&share_code=([^&]+)&receive_code=([^&]+)&id=([^&]+)(?:&file_name=([^&]+))?")
+            old_share_match = old_share_pattern.match(content)
+            if old_share_match:
+                share_code = old_share_match.group(1)
+                receive_code = old_share_match.group(2)
+                file_id = old_share_match.group(3)
+                filename = old_share_match.group(4) or strm_file.stem
+                new_content = f"{server_address.rstrip('/')}/s/{share_code}_{receive_code}_{file_id}?/{filename}"
+                
+                # 写回文件
+                with open(strm_file, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                
+                converted_count += 1
+                logger.info(f"转换文件: {strm_file} -> {new_content}")
+                continue
+                
+        except Exception as e:
+            error_count += 1
+            logger.error(f"转换文件失败: {strm_file}, 错误: {e}")
+    
+    logger.info(f"STRM 文件格式转换完成: 成功转换 {converted_count} 个文件, 失败 {error_count} 个文件")
+    return converted_count, error_count
