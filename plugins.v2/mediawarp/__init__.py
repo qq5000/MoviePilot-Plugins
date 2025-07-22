@@ -379,8 +379,161 @@ class MediaWarp(_PluginBase):
             },
         ]
 
-        # 在基础设置卡片后插入客户端过滤卡片
+        # 基础设置卡片
+        base_form_card = {
+            "component": "VCard",
+            "props": {"variant": "outlined", "class": "mb-3"},
+            "content": [
+                {
+                    "component": "VCardTitle",
+                    "props": {"class": "d-flex align-center"},
+                    "content": [
+                        {
+                            "component": "VIcon",
+                            "props": {
+                                "icon": "mdi-cog",
+                                "color": "primary",
+                                "class": "mr-2",
+                            },
+                        },
+                        {"component": "span", "text": "基础设置"},
+                    ],
+                },
+                {"component": "VDivider"},
+                {
+                    "component": "VCardText",
+                    "content": [
+                        {
+                            "component": "VForm",
+                            "content": [
+                                {
+                                    "component": "VRow",
+                                    "content": [
+                                        {
+                                            "component": "VCol",
+                                            "props": {"cols": 12, "md": 4},
+                                            "content": [
+                                                {
+                                                    "component": "VSwitch",
+                                                    "props": {
+                                                        "model": "enabled",
+                                                        "label": "启用插件",
+                                                    },
+                                                }
+                                            ],
+                                        },
+                                        {
+                                            "component": "VCol",
+                                            "props": {"cols": 12, "md": 4},
+                                            "content": [
+                                                {
+                                                    "component": "VTextField",
+                                                    "props": {
+                                                        "model": "port",
+                                                        "label": "端口",
+                                                        "hint": "反代后媒体服务器访问端口",
+                                                        "persistent-hint": True,
+                                                    },
+                                                }
+                                            ],
+                                        },
+                                        {
+                                            "component": "VCol",
+                                            "props": {"cols": 12, "md": 4},
+                                            "content": [
+                                                {
+                                                    "component": "VSelect",
+                                                    "props": {
+                                                        "multiple": True,
+                                                        "chips": True,
+                                                        "clearable": True,
+                                                        "model": "mediaservers",
+                                                        "label": "媒体服务器",
+                                                        "items": [
+                                                            {
+                                                                "title": config.name,
+                                                                "value": config.name,
+                                                            }
+                                                            for config in self._mediaserver_helper.get_configs().values()
+                                                            if config.type == "emby"
+                                                            or config.type == "jellyfin"
+                                                        ],
+                                                        "hint": "同时只能选择一个",
+                                                        "persistent-hint": True,
+                                                    },
+                                                }
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "component": "VRow",
+                            "content": [
+                                {
+                                    "component": "VCol",
+                                    "props": {"cols": 12},
+                                    "content": [
+                                        {
+                                            "component": "VTextarea",
+                                            "props": {
+                                                "model": "media_strm_path",
+                                                "label": "Emby STRM 媒体库路径",
+                                                "rows": 5,
+                                                "placeholder": "一行一个",
+                                            },
+                                        },
+                                    ],
+                                }
+                            ],
+                        },
+                        {
+                            "component": "VAlert",
+                            "props": {
+                                "type": "info",
+                                "variant": "tonal",
+                                "density": "compact",
+                                "class": "mt-2",
+                            },
+                            "content": [
+                                {"component": "div", "text": "注意："},
+                                {"component": "div", "text": "如果 MoviePilot 容器为 bridge 模式需要手动映射配置的端口"},
+                                {"component": "div", "text": "更多配置可以前往 MoviePilot 配置目录找到此插件的配置目录进行详细配置"},
+                            ],
+                        },
+                        {
+                            "component": "VAlert",
+                            "props": {
+                                "type": "info",
+                                "variant": "tonal",
+                                "density": "compact",
+                                "class": "mt-2",
+                            },
+                            "content": [
+                                {"component": "div", "text": "目前支持 115网盘STRM助手，123云盘STRM助手，CloudMediaSync，OneStrm"},
+                                {"component": "div", "text": "Symedia，q115-strm 等软件生成的STRM文件"},
+                            ],
+                        },
+                        {
+                            "component": "VAlert",
+                            "props": {
+                                "type": "info",
+                                "variant": "tonal",
+                                "density": "compact",
+                                "class": "mt-2",
+                            },
+                            "content": [
+                                {"component": "div", "text": "感谢项目作者：https://github.com/Akimio521/MediaWarp"},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }
+        # 组装最终form
         form = [
+            base_form_card,
             {
                 "component": "VCard",
                 "props": {"variant": "outlined", "class": "mb-3"},
