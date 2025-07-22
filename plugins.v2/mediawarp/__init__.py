@@ -662,6 +662,8 @@ class MediaWarp(_PluginBase):
             "ClientFilter.ClientList": [ua.strip() for ua in self._client_filter_list.split("\n") if ua.strip()],
         }
         self.__modify_config(Path(self.__config_path / self.__config_filename), changes)
+        # 调试日志输出
+        logger.info(f"[调试] ClientFilter.Enable: {self._client_filter_enable}, Mode: {self._client_filter_mode}, List: {self._client_filter_list}")
 
         Path(self.__config_path).mkdir(parents=True, exist_ok=True)
         Path(self.__logs_dir).mkdir(parents=True, exist_ok=True)
@@ -792,3 +794,4 @@ class MediaWarp(_PluginBase):
                     self.process.terminate()
         except Exception as e:
             logger.error(f"退出插件失败：{e}")
+
