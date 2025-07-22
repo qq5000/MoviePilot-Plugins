@@ -450,13 +450,7 @@ class MediaWarp(_PluginBase):
                                                         "model": "mediaservers",
                                                         "label": "媒体服务器",
                                                         "items": [
-                                                            {
-                                                                "title": config.name,
-                                                                "value": config.name,
-                                                            }
-                                                            for config in self._mediaserver_helper.get_configs().values()
-                                                            if config.type == "emby"
-                                                            or config.type == "jellyfin"
+                                                            {"title": "示例服务器", "value": "example"}
                                                         ],
                                                         "hint": "同时只能选择一个",
                                                         "persistent-hint": True,
