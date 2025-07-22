@@ -65,7 +65,6 @@ class MediaInfoDownloader:
                 resp = self.client.download_info(
                     item,
                     base_url="",
-                    async_=False,
                     headers={"User-Agent": settings.USER_AGENT},
                 )
                 check_response(resp)
@@ -1203,7 +1202,6 @@ class P123StrmHelper(_PluginBase):
             resp = self._client.download_info(
                 payload,
                 base_url="",
-                async_=False,
                 headers={"User-Agent": user_agent},
             )
             check_response(resp)
