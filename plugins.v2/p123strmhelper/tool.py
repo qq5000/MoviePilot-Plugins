@@ -88,4 +88,4 @@ class P123OpenAutoClient:
                 kwargs["headers"] = self._open_headers
             return attr(*args, **kwargs)
 
-        return wrapped 
+        return wrapped
