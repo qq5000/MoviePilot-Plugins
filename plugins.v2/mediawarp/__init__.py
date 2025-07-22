@@ -59,6 +59,9 @@ class MediaWarp(_PluginBase):
     _danmaku = False
     _video_together = False
     _srt2ass = False
+    _client_filter_enable = False
+    _client_filter_mode = "BlackList"  # "WhiteList" or "BlackList"
+    _client_filter_list = ""
 
     def __init__(self):
         """
@@ -97,6 +100,9 @@ class MediaWarp(_PluginBase):
             self._danmaku = config.get("danmaku")
             self._video_together = config.get("video_together")
             self._srt2ass = config.get("srt2ass")
+            self._client_filter_enable = config.get("client_filter_enable", False)
+            self._client_filter_mode = config.get("client_filter_mode", "BlackList")
+            self._client_filter_list = config.get("client_filter_list", "")
 
             # 获取媒体服务器
             if self._mediaservers:
@@ -148,6 +154,9 @@ class MediaWarp(_PluginBase):
                 "danmaku": self._danmaku,
                 "video_together": self._video_together,
                 "srt2ass": self._srt2ass,
+                "client_filter_enable": self._client_filter_enable,
+                "client_filter_mode": self._client_filter_mode,
+                "client_filter_list": self._client_filter_list,
             }
         )
 
@@ -286,6 +295,145 @@ class MediaWarp(_PluginBase):
                                     "persistent-hint": True,
                                 },
                             }
+                        ],
+                    },
+                ],
+            },
+        ]
+
+        # 客户端过滤表单
+        client_filter_form = [
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 4},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "client_filter_enable",
+                                    "label": "启用客户端过滤",
+                                    "hint": "启用后可按UA黑/白名单屏蔽特定客户端",
+                                    "persistent-hint": True,
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 4},
+                        "content": [
+                            {
+                                "component": "VSelect",
+                                "props": {
+                                    "model": "client_filter_mode",
+                                    "label": "过滤模式",
+                                    "items": [
+                                        {"title": "黑名单", "value": "BlackList"},
+                                        {"title": "白名单", "value": "WhiteList"},
+                                    ],
+                                    "hint": "黑名单：列表内UA禁止访问，白名单：仅允许列表内UA访问",
+                                    "persistent-hint": True,
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextarea",
+                                "props": {
+                                    "model": "client_filter_list",
+                                    "label": "UA列表（每行一个）",
+                                    "rows": 5,
+                                    "placeholder": "如：Emby/3.2.32-17.41\nInfuse-Direct/7.8\nVLC/3.0.18",
+                                    "hint": "填写需过滤的User-Agent关键字，每行一个，支持模糊匹配",
+                                    "persistent-hint": True,
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "component": "VAlert",
+                "props": {
+                    "type": "info",
+                    "variant": "tonal",
+                    "density": "compact",
+                    "class": "mt-2",
+                },
+                "content": [
+                    {"component": "div", "text": "黑名单：列表内UA禁止访问，其他放行。白名单：仅允许列表内UA访问。"},
+                    {"component": "div", "text": "UA可参考 docs/UA.md 或浏览器/客户端User-Agent。"},
+                ],
+            },
+        ]
+
+        # 在基础设置卡片后插入客户端过滤卡片
+        form = [
+            {
+                "component": "VCard",
+                "props": {"variant": "outlined", "class": "mb-3"},
+                "content": [
+                    {"component": "VCardTitle", "props": {"class": "d-flex align-center"}, "content": [
+                        {"component": "VIcon", "props": {"icon": "mdi-shield-account", "color": "primary", "class": "mr-2"}},
+                        {"component": "span", "text": "客户端过滤"},
+                    ]},
+                    {"component": "VDivider"},
+                    {"component": "VCardText", "content": client_filter_form},
+                ],
+            },
+            {
+                "component": "VCard",
+                "props": {"variant": "outlined", "class": "mb-3"},
+                "content": [
+                    {
+                        "component": "VCardTitle",
+                        "props": {"class": "d-flex align-center"},
+                        "content": [
+                            {
+                                "component": "VIcon",
+                                "props": {
+                                    "icon": "mdi-file-move-outline",
+                                    "start": True,
+                                    "color": "#1976D2",
+                                },
+                            },
+                            {"component": "span", "text": "Web页面配置"},
+                        ],
+                    },
+                    {"component": "VDivider"},
+                    {
+                        "component": "VWindow",
+                        "props": {"model": "tab"},
+                        "content": [
+                            {
+                                "component": "VWindowItem",
+                                "props": {"value": "web-ui"},
+                                "content": [
+                                    {
+                                        "component": "VCardText",
+                                        "content": web_ui,
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VWindowItem",
+                                "props": {"value": "subtitle"},
+                                "content": [
+                                    {"component": "VCardText", "content": subtitle}
+                                ],
+                            },
                         ],
                     },
                 ],
@@ -542,6 +690,9 @@ class MediaWarp(_PluginBase):
             "video_together": False,
             "srt2ass": False,
             "tab": "web-ui",
+            "client_filter_enable": False,
+            "client_filter_mode": "BlackList",
+            "client_filter_list": "",
         }
 
     def get_page(self) -> List[dict]:
@@ -596,6 +747,9 @@ class MediaWarp(_PluginBase):
             "HTTPStrm.FinalURL": True,
             "HTTPStrm.PrefixList": self._media_strm_path.split("\n"),
             "Subtitle.SRT2ASS": bool(self._srt2ass),
+            "ClientFilter.Enable": bool(self._client_filter_enable),
+            "ClientFilter.Mode": self._client_filter_mode,
+            "ClientFilter.ClientList": [ua.strip() for ua in self._client_filter_list.split("\n") if ua.strip()],
         }
         self.__modify_config(Path(self.__config_path / self.__config_filename), changes)
 
