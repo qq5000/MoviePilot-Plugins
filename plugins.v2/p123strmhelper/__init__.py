@@ -30,14 +30,18 @@ from app.schemas.types import EventType, MediaType
 from app.utils.system import SystemUtils
 
 from .tool import P123AutoClient
+
+
 class MediaInfoDownloader:
     """
     媒体信息文件下载器
     """
 
-    def __init__(self, client: P123AutoClient, plugin_ref=None):
+    def __init__(self, client: P123AutoClient):
         self.client = client
-        self.plugin_ref = plugin_ref  # 引用插件本身以便轮换账号
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        }
 
     @staticmethod
     def is_file_leq_1k(file_path):
@@ -49,42 +53,21 @@ class MediaInfoDownloader:
             return True
         return file.stat().st_size <= 1024
 
-    def get_download_url_with_retry(self, item: Dict, max_retry: int = None):
+    def get_download_url(
+        self,
+        item: Dict,
+    ):
         """
-        获取下载链接，失败则自动轮换账号池重试
+        获取下载链接
         """
-        plugin = self.plugin_ref
-        if plugin and hasattr(plugin, '_account_pool') and plugin._account_pool:
-            pool_len = len(plugin._account_pool)
-        else:
-            pool_len = 1
-        if max_retry is None:
-            max_retry = pool_len
-        for attempt in range(max_retry):
-            try:
-                resp = self.client.download_info(
-                    item,
-                    base_url="",
-                    async_=False,
-                    headers={"User-Agent": settings.USER_AGENT},
-                )
-                check_response(resp)
-                logger.info(f"【账号池】账号{plugin._passport if plugin else ''}获取下载地址成功")
-                return resp.get("data", {}).get("DownloadUrl", None)
-            except Exception as e:
-                logger.warning(f"【账号池】账号{plugin._passport if plugin else ''}获取下载地址失败: {e}")
-                if plugin and plugin._account_pool and max_retry > 1:
-                    logger.info("【账号池】尝试轮换账号池账号后重试")
-                    plugin.rotate_account()
-                    self.client = plugin._client  # 更新client
-                else:
-                    break
-        logger.error("【账号池】所有账号均尝试失败，无法获取下载地址")
-        return None
-
-    def get_download_url(self, item: Dict):
-        # 兼容原有调用，直接用带重试的
-        return self.get_download_url_with_retry(item)
+        resp = self.client.download_info(
+            item,
+            base_url="",
+            async_=False,
+            headers=self.headers,
+        )
+        check_response(resp)
+        return resp.get("data", {}).get("DownloadUrl", None)
 
     def save_mediainfo_file(self, file_path: Path, file_name: str, download_url: str):
         """
@@ -95,9 +78,7 @@ class MediaInfoDownloader:
             download_url,
             stream=True,
             timeout=30,
-            headers={
-                "User-Agent": settings.USER_AGENT,
-            },
+            headers=self.headers,
         ) as response:
             response.raise_for_status()
             with open(file_path, "wb") as f:
@@ -192,7 +173,7 @@ class FullSyncStrmHelper:
         self.strm_fail_dict: Dict[str, str] = {}
         self.mediainfo_fail_dict: List = None
         self.server_address = server_address.rstrip("/")
-        self._mediainfodownloader = MediaInfoDownloader(client=self.client, plugin_ref=self)
+        self._mediainfodownloader = MediaInfoDownloader(client=self.client)
         self._storagechain = StorageChain()
         self.download_mediainfo_list = []
 
@@ -334,7 +315,7 @@ class ShareStrmHelper:
         self.share_media_path = share_media_path
         self.local_media_path = local_media_path
         self.server_address = server_address.rstrip("/")
-        self._mediainfodownloader = MediaInfoDownloader(client=self.client, plugin_ref=self)
+        self._mediainfodownloader = MediaInfoDownloader(client=self.client)
         self.download_mediainfo_list = []
 
     def has_prefix(self, full_path, prefix_path):
@@ -452,7 +433,7 @@ class P123StrmHelper(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDS-Derek/MoviePilot-Plugins/main/icons/P123Disk.png"
     # 插件版本
-    plugin_version = "1.0.9"
+    plugin_version = "1.0.11"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -471,9 +452,6 @@ class P123StrmHelper(_PluginBase):
     _once_full_sync_strm = False
     _passport = None
     _password = None
-    _account_pool = []
-    _current_account_index = 0
-    _account_pool_last_len = 0
     moviepilot_address = None
     _user_rmt_mediaext = None
     _user_download_mediaext = None
@@ -497,7 +475,6 @@ class P123StrmHelper(_PluginBase):
     _clear_recyclebin_enabled = False
     _clear_receive_path_enabled = False
     _cron_clear = None
-    _account_pool_raw = None
 
     def init_plugin(self, config: dict = None):
         """
@@ -542,13 +519,6 @@ class P123StrmHelper(_PluginBase):
             self._clear_recyclebin_enabled = config.get("clear_recyclebin_enabled")
             self._clear_receive_path_enabled = config.get("clear_receive_path_enabled")
             self._cron_clear = config.get("cron_clear")
-            self._account_pool_raw = config.get("account_pool", "")
-            self._account_pool = []
-            for line in self._account_pool_raw.strip().splitlines():
-                if "#" in line:
-                    passport, password = line.split("#", 1)
-                    self._account_pool.append({"passport": passport.strip(), "password": password.strip()})
-            self._account_pool_last_len = len(self._account_pool)
             if not self._user_rmt_mediaext:
                 self._user_rmt_mediaext = "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v"
             if not self._user_download_mediaext:
@@ -561,52 +531,13 @@ class P123StrmHelper(_PluginBase):
                 self._user_share_pan_path = "/"
             self.__update_config()
 
-        # 启动时账号池赋值到单账号配置
-        if self._account_pool:
-            self._current_account_index = 0
-            account = self._account_pool[self._current_account_index]
-            self._passport = account.get("passport", "")
-            self._password = account.get("password", "")
-            passport_masked = self._passport
-            if len(passport_masked) >= 7:
-                passport_masked = f"{passport_masked[:3]}****{passport_masked[-4:]}"
-            logger.info(f"【账号池】账号初始化：当前索引 1/{len(self._account_pool)}，账号：{passport_masked}")
-
         try:
             self._client = P123AutoClient(self._passport, self._password)
         except Exception as e:
             logger.error(f"123云盘客户端创建失败: {e}")
 
+        # 停止现有任务
         self.stop_service()
-
-        # 定时账号池轮换（只要有账号池）
-        if self._enabled and len(self._account_pool) > 1:
-            if not self._scheduler:
-                self._scheduler = BackgroundScheduler(timezone=settings.TZ)
-            self._scheduler.add_job(
-                func=self.rotate_account,
-                trigger='cron',
-                minute='0,30',
-                name="账号池轮换"
-            )
-            # 新增：每分钟输出倒计时日志
-            self._scheduler.add_job(
-                func=self.log_rotate_countdown,
-                trigger='cron',
-                minute='*',
-                name="账号池轮换倒计时"
-            )
-            # 新增：每天0点清理日志
-            self._scheduler.add_job(
-                func=self.clean_logs,
-                trigger='cron',
-                hour=0,
-                minute=0,
-                name="日志清理"
-            )
-            if self._scheduler.get_jobs():
-                self._scheduler.print_jobs()
-                self._scheduler.start()
 
         if self._enabled and self._once_full_sync_strm:
             self._scheduler = BackgroundScheduler(timezone=settings.TZ)
@@ -637,43 +568,6 @@ class P123StrmHelper(_PluginBase):
             if self._scheduler.get_jobs():
                 self._scheduler.print_jobs()
                 self._scheduler.start()
-
-    def rotate_account(self):
-        if not self._account_pool:
-            return
-        old_index = self._current_account_index
-        self._current_account_index = (self._current_account_index + 1) % len(self._account_pool)
-        account = self._account_pool[self._current_account_index]
-        self._passport = account.get("passport", "")
-        self._password = account.get("password", "")
-        passport_masked = self._passport
-        if len(passport_masked) >= 7:
-            passport_masked = f"{passport_masked[:3]}****{passport_masked[-4:]}"
-        logger.info(f"【账号池】账号轮换：切换到 {self._current_account_index+1}/{len(self._account_pool)}（{passport_masked}）")
-        try:
-            self._client = P123AutoClient(self._passport, self._password)
-            logger.info(f"【账号池】已切换账号并重建 client：{passport_masked}")
-        except Exception as e:
-            logger.error(f"【账号池】切换账号时重建 client 失败: {e}")
-        self.__update_config()
-
-    def log_rotate_countdown(self):
-        try:
-            logger.info("log_rotate_countdown called")  # 调试用
-            from datetime import datetime, timedelta
-            import pytz
-            now = datetime.now(pytz.timezone(settings.TZ))
-            # 计算下一个半点
-            next_half_hour = now.replace(second=0, microsecond=0)
-            if now.minute < 30:
-                next_half_hour = next_half_hour.replace(minute=30)
-            else:
-                # 到下一个小时的30分
-                next_half_hour = (next_half_hour + timedelta(hours=1)).replace(minute=30)
-            minutes_left = int((next_half_hour - now).total_seconds() // 60)
-            logger.info(f"【账号池】距离下次账号自动轮换还有 {minutes_left} 分钟")
-        except Exception as e:
-            logger.error(f"log_rotate_countdown error: {e}")
 
     def get_state(self) -> bool:
         return self._enabled
@@ -729,14 +623,7 @@ class P123StrmHelper(_PluginBase):
                 "methods": ["GET", "POST", "HEAD"],
                 "summary": "302跳转",
                 "description": "123云盘302跳转",
-            },
-            {
-                "path": "/rotate_account",
-                "endpoint": self.api_rotate_account,
-                "methods": ["POST"],
-                "summary": "手动切换账号池账号",
-                "description": "手动切换账号池账号，切换后自动重建client。",
-            },
+            }
         ]
 
     def get_service(self) -> List[Dict[str, Any]]:
@@ -774,11 +661,12 @@ class P123StrmHelper(_PluginBase):
             return cron_service
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
+        """
+        拼装插件配置页面，需要返回两块数据：1、页面配置；2、数据结构
+        """
         _mediaserver_helper = MediaServerHelper()
-        # ... 其余 tab 定义 ...
 
-        # 基础设置卡片内容
-        base_card_content = [
+        transfer_monitor_tab = [
             {
                 "component": "VRow",
                 "content": [
@@ -789,8 +677,8 @@ class P123StrmHelper(_PluginBase):
                             {
                                 "component": "VSwitch",
                                 "props": {
-                                    "model": "enabled",
-                                    "label": "启用插件",
+                                    "model": "transfer_monitor_enabled",
+                                    "label": "整理事件监控",
                                 },
                             }
                         ],
@@ -800,10 +688,10 @@ class P123StrmHelper(_PluginBase):
                         "props": {"cols": 12, "md": 3},
                         "content": [
                             {
-                                "component": "VTextField",
+                                "component": "VSwitch",
                                 "props": {
-                                    "model": "passport",
-                                    "label": "手机号",
+                                    "model": "transfer_monitor_scrape_metadata_enabled",
+                                    "label": "STRM自动刮削",
                                 },
                             }
                         ],
@@ -813,10 +701,10 @@ class P123StrmHelper(_PluginBase):
                         "props": {"cols": 12, "md": 3},
                         "content": [
                             {
-                                "component": "VTextField",
+                                "component": "VSwitch",
                                 "props": {
-                                    "model": "password",
-                                    "label": "密码",
+                                    "model": "transfer_monitor_media_server_refresh_enabled",
+                                    "label": "媒体服务器刷新",
                                 },
                             }
                         ],
@@ -826,10 +714,17 @@ class P123StrmHelper(_PluginBase):
                         "props": {"cols": 12, "md": 3},
                         "content": [
                             {
-                                "component": "VTextField",
+                                "component": "VSelect",
                                 "props": {
-                                    "model": "moviepilot_address",
-                                    "label": "MoviePilot 内网访问地址",
+                                    "multiple": True,
+                                    "chips": True,
+                                    "clearable": True,
+                                    "model": "transfer_monitor_mediaservers",
+                                    "label": "媒体服务器",
+                                    "items": [
+                                        {"title": config.name, "value": config.name}
+                                        for config in _mediaserver_helper.get_configs().values()
+                                    ],
                                 },
                             }
                         ],
@@ -844,113 +739,372 @@ class P123StrmHelper(_PluginBase):
                         "props": {"cols": 12},
                         "content": [
                             {
-                                "component": "VTextField",
+                                "component": "VTextarea",
                                 "props": {
-                                    "model": "user_rmt_mediaext",
-                                    "label": "可整理媒体文件扩展名",
+                                    "model": "transfer_monitor_paths",
+                                    "label": "整理事件监控目录",
+                                    "rows": 5,
+                                    "placeholder": "一行一个，格式：本地STRM目录#网盘媒体库目录\n例如：\n/volume1/strm/movies#/媒体库/电影\n/volume1/strm/tv#/媒体库/剧集",
+                                    "hint": "监控MoviePilot整理入库事件，自动在此处配置的本地目录生成对应的STRM文件。",
+                                    "persistent-hint": True,
                                 },
-                            }
-                        ],
-                    }
-                ],
-            },
-            {
-                "component": "VRow",
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12},
-                        "content": [
+                            },
                             {
-                                "component": "VTextField",
+                                "component": "VAlert",
                                 "props": {
-                                    "model": "user_download_mediaext",
-                                    "label": "可下载媒体数据文件扩展名",
-                                },
-                            }
-                        ],
-                    }
-                ],
-            },
-            # 新增手动切换账号按钮
-            {
-                "component": "VRow",
-                "content": [
-                    {
-                        "component": "VCol",
-                        "props": {"cols": 12},
-                        "content": [
-                            {
-                                "component": "VBtn",
-                                "props": {
-                                    "color": "primary",
-                                    "block": True,
+                                    "type": "info",
+                                    "variant": "tonal",
+                                    "density": "compact",
                                     "class": "mt-2",
-                                    "action": "rotate_account",
                                 },
-                                "content": "手动切换账号池账号"
-                            }
+                                "content": [
+                                    {"component": "div", "text": "格式示例："},
+                                    {
+                                        "component": "div",
+                                        "props": {"class": "ml-2"},
+                                        "text": "本地路径1#网盘路径1",
+                                    },
+                                    {
+                                        "component": "div",
+                                        "props": {"class": "ml-2"},
+                                        "text": "本地路径2#网盘路径2",
+                                    },
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextarea",
+                                "props": {
+                                    "model": "transfer_mp_mediaserver_paths",
+                                    "label": "媒体服务器映射替换",
+                                    "rows": 2,
+                                    "placeholder": "一行一个，格式：媒体库服务器映射目录#MP映射目录\n例如：\n/media#/data",
+                                    "hint": "用于媒体服务器映射路径和MP映射路径不一样时自动刷新媒体服务器入库",
+                                    "persistent-hint": True,
+                                },
+                            },
+                            {
+                                "component": "VAlert",
+                                "props": {
+                                    "type": "info",
+                                    "variant": "tonal",
+                                    "density": "compact",
+                                    "class": "mt-2",
+                                },
+                                "content": [
+                                    {
+                                        "component": "div",
+                                        "text": "媒体服务器映射路径和MP映射路径不一样时请配置此项，如果不配置则无法正常刷新",
+                                    },
+                                    {
+                                        "component": "div",
+                                        "text": "当映射路径一样时可省略此配置",
+                                    },
+                                ],
+                            },
                         ],
                     }
                 ],
             },
         ]
 
-        # 账号池独立卡片
-        account_pool_card = {
-            "component": "VCard",
-            "props": {"variant": "outlined", "class": "mb-3"},
-            "content": [
-                {
-                    "component": "VCardTitle",
-                    "props": {"class": "d-flex align-center"},
-                    "content": [
-                        {
-                            "component": "VIcon",
-                            "props": {
-                                "icon": "mdi-account-switch",
-                                "color": "primary",
-                                "class": "mr-2",
+        full_sync_tab = [
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "once_full_sync_strm",
+                                    "label": "立刻全量同步",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "timing_full_sync_strm",
+                                    "label": "定期全量同步",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VCronField",
+                                "props": {
+                                    "model": "cron_full_sync_strm",
+                                    "label": "运行全量同步周期",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 3},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "full_sync_auto_download_mediainfo_enabled",
+                                    "label": "下载媒体数据文件",
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VTextarea",
+                                "props": {
+                                    "model": "full_sync_strm_paths",
+                                    "label": "全量同步目录",
+                                    "rows": 5,
+                                    "placeholder": "一行一个，格式：本地STRM目录#网盘媒体库目录\n例如：\n/volume1/strm/movies#/媒体库/电影\n/volume1/strm/tv#/媒体库/剧集",
+                                    "hint": "全量扫描配置的网盘目录，并在对应的本地目录生成STRM文件。",
+                                    "persistent-hint": True,
+                                },
                             },
-                        },
-                        {"component": "span", "text": "账号池设置"},
-                    ],
-                },
-                {"component": "VDivider"},
-                {
-                    "component": "VCardText",
-                    "content": [
-                        {
-                            "component": "VRow",
-                            "content": [
-                                {
-                                    "component": "VCol",
-                                    "props": {"cols": 12},
-                                    "content": [
-                                        {
-                                            "component": "VTextarea",
-                                            "props": {
-                                                "model": "account_pool",
-                                                "label": "账号池（每行一个，格式：手机号#密码）",
-                                                "rows": 5,
-                                                "placeholder": "例如：\n13800000000#password1\n13900000000#password2",
-                                                "hint": "支持多个账号，自动轮换，每小时切换一次。",
-                                                "persistent-hint": True,
-                                            },
-                                        }
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
-                },
-            ],
-        }
+                            {
+                                "component": "VAlert",
+                                "props": {
+                                    "type": "info",
+                                    "variant": "tonal",
+                                    "density": "compact",
+                                    "class": "mt-2",
+                                },
+                                "content": [
+                                    {"component": "div", "text": "格式示例："},
+                                    {
+                                        "component": "div",
+                                        "props": {"class": "ml-2"},
+                                        "text": "本地路径1#网盘路径1",
+                                    },
+                                    {
+                                        "component": "div",
+                                        "props": {"class": "ml-2"},
+                                        "text": "本地路径2#网盘路径2",
+                                    },
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            },
+        ]
 
-        # 拼接当前账号池内容用于回显
-        account_pool_str = "\n".join([
-            f"{acc['passport']}#{acc['password']}" for acc in self._account_pool
-        ])
+        share_generate_tab = [
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 4},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "share_strm_enabled",
+                                    "label": "运行分享生成STRM",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 4},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "share_strm_auto_download_mediainfo_enabled",
+                                    "label": "下载媒体数据文件",
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 6},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "user_share_code",
+                                    "label": "分享码",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 6},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "user_share_pwd",
+                                    "label": "分享密码",
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 6},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "user_share_pan_path",
+                                    "label": "分享文件夹路径",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 6},
+                        "content": [
+                            {
+                                "component": "VTextField",
+                                "props": {
+                                    "model": "user_share_local_path",
+                                    "label": "本地生成STRM路径",
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VAlert",
+                        "props": {
+                            "type": "info",
+                            "variant": "tonal",
+                            "density": "compact",
+                            "class": "mt-2",
+                        },
+                        "content": [
+                            {
+                                "component": "div",
+                                "text": "分享链接/分享码和分享密码 只需要二选一配置即可",
+                            },
+                            {
+                                "component": "div",
+                                "text": "同时填写分享链接，分享码和分享密码时，优先读取分享链接",
+                            },
+                        ],
+                    },
+                ],
+            },
+        ]
+
+        cleanup_tab = [
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12},
+                        "content": [
+                            {
+                                "component": "VAlert",
+                                "props": {
+                                    "type": "warning",
+                                    "variant": "tonal",
+                                    "density": "compact",
+                                    "text": "注意，清空 回收站/我的秒传 后文件不可恢复，如果产生重要数据丢失本程序不负责！",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "component": "VRow",
+                "content": [
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 4},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "clear_recyclebin_enabled",
+                                    "label": "清空回收站",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 4},
+                        "content": [
+                            {
+                                "component": "VSwitch",
+                                "props": {
+                                    "model": "clear_receive_path_enabled",
+                                    "label": "清空我的秒传目录",
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "component": "VCol",
+                        "props": {"cols": 12, "md": 4},
+                        "content": [
+                            {
+                                "component": "VCronField",
+                                "props": {"model": "cron_clear", "label": "清理周期"},
+                            }
+                        ],
+                    },
+                ],
+            },
+        ]
 
         return [
             {
@@ -973,11 +1127,219 @@ class P123StrmHelper(_PluginBase):
                         ],
                     },
                     {"component": "VDivider"},
-                    {"component": "VCardText", "content": base_card_content},
+                    {
+                        "component": "VCardText",
+                        "content": [
+                            {
+                                "component": "VRow",
+                                "content": [
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 12, "md": 3},
+                                        "content": [
+                                            {
+                                                "component": "VSwitch",
+                                                "props": {
+                                                    "model": "enabled",
+                                                    "label": "启用插件",
+                                                },
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 12, "md": 3},
+                                        "content": [
+                                            {
+                                                "component": "VTextField",
+                                                "props": {
+                                                    "model": "passport",
+                                                    "label": "手机号",
+                                                },
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 12, "md": 3},
+                                        "content": [
+                                            {
+                                                "component": "VTextField",
+                                                "props": {
+                                                    "model": "password",
+                                                    "label": "密码",
+                                                },
+                                            }
+                                        ],
+                                    },
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 12, "md": 3},
+                                        "content": [
+                                            {
+                                                "component": "VTextField",
+                                                "props": {
+                                                    "model": "moviepilot_address",
+                                                    "label": "MoviePilot 内网访问地址",
+                                                },
+                                            }
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "component": "VRow",
+                                "content": [
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 12},
+                                        "content": [
+                                            {
+                                                "component": "VTextField",
+                                                "props": {
+                                                    "model": "user_rmt_mediaext",
+                                                    "label": "可整理媒体文件扩展名",
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VRow",
+                                "content": [
+                                    {
+                                        "component": "VCol",
+                                        "props": {"cols": 12},
+                                        "content": [
+                                            {
+                                                "component": "VTextField",
+                                                "props": {
+                                                    "model": "user_download_mediaext",
+                                                    "label": "可下载媒体数据文件扩展名",
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    },
                 ],
             },
-            account_pool_card,
-            # ... 其余卡片 ...
+            {
+                "component": "VCard",
+                "props": {"variant": "outlined"},
+                "content": [
+                    {
+                        "component": "VTabs",
+                        "props": {"model": "tab", "grow": True, "color": "primary"},
+                        "content": [
+                            {
+                                "component": "VTab",
+                                "props": {"value": "tab-transfer"},
+                                "content": [
+                                    {
+                                        "component": "VIcon",
+                                        "props": {
+                                            "icon": "mdi-file-move-outline",
+                                            "start": True,
+                                            "color": "#1976D2",
+                                        },
+                                    },
+                                    {"component": "span", "text": "监控MP整理"},
+                                ],
+                            },
+                            {
+                                "component": "VTab",
+                                "props": {"value": "tab-sync"},
+                                "content": [
+                                    {
+                                        "component": "VIcon",
+                                        "props": {
+                                            "icon": "mdi-sync",
+                                            "start": True,
+                                            "color": "#4CAF50",
+                                        },
+                                    },
+                                    {"component": "span", "text": "全量同步"},
+                                ],
+                            },
+                            {
+                                "component": "VTab",
+                                "props": {"value": "tab-share"},
+                                "content": [
+                                    {
+                                        "component": "VIcon",
+                                        "props": {
+                                            "icon": "mdi-share-variant-outline",
+                                            "start": True,
+                                            "color": "#009688",
+                                        },
+                                    },
+                                    {"component": "span", "text": "分享生成STRM"},
+                                ],
+                            },
+                            {
+                                "component": "VTab",
+                                "props": {"value": "tab-cleanup"},
+                                "content": [
+                                    {
+                                        "component": "VIcon",
+                                        "props": {
+                                            "icon": "mdi-broom",
+                                            "start": True,
+                                            "color": "#FF9800",
+                                        },
+                                    },
+                                    {"component": "span", "text": "定期清理"},
+                                ],
+                            },
+                        ],
+                    },
+                    {"component": "VDivider"},
+                    {
+                        "component": "VWindow",
+                        "props": {"model": "tab"},
+                        "content": [
+                            {
+                                "component": "VWindowItem",
+                                "props": {"value": "tab-transfer"},
+                                "content": [
+                                    {
+                                        "component": "VCardText",
+                                        "content": transfer_monitor_tab,
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VWindowItem",
+                                "props": {"value": "tab-sync"},
+                                "content": [
+                                    {"component": "VCardText", "content": full_sync_tab}
+                                ],
+                            },
+                            {
+                                "component": "VWindowItem",
+                                "props": {"value": "tab-share"},
+                                "content": [
+                                    {
+                                        "component": "VCardText",
+                                        "content": share_generate_tab,
+                                    }
+                                ],
+                            },
+                            {
+                                "component": "VWindowItem",
+                                "props": {"value": "tab-cleanup"},
+                                "content": [
+                                    {"component": "VCardText", "content": cleanup_tab}
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
         ], {
             "enabled": False,
             "once_full_sync_strm": False,
@@ -986,44 +1348,62 @@ class P123StrmHelper(_PluginBase):
             "moviepilot_address": "",
             "user_rmt_mediaext": "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v",
             "user_download_mediaext": "srt,ssa,ass",
-            "account_pool": self._account_pool_raw,
-            # ... 其余默认配置 ...
+            "transfer_monitor_enabled": False,
+            "transfer_monitor_paths": "",
+            "transfer_monitor_scrape_metadata_enabled": False,
+            "transfer_mp_mediaserver_paths": "",
+            "transfer_monitor_media_server_refresh_enabled": False,
+            "transfer_monitor_mediaservers": [],
+            "timing_full_sync_strm": False,
+            "full_sync_auto_download_mediainfo_enabled": False,
+            "cron_full_sync_strm": "0 */7 * * *",
+            "full_sync_strm_paths": "",
+            "share_strm_enabled": False,
+            "share_strm_auto_download_mediainfo_enabled": False,
+            "user_share_code": "",
+            "user_share_pwd": "",
+            "user_share_pan_path": "/",
+            "user_share_local_path": "",
+            "clear_recyclebin_enabled": False,
+            "clear_receive_path_enabled": False,
+            "cron_clear": "0 */7 * * *",
+            "tab": "tab-transfer",
         }
 
     def get_page(self) -> List[dict]:
         pass
 
     def __update_config(self):
-        # 账号池原始字符串直接保存
-        self.update_config({
-            "enabled": self._enabled,
-            "once_full_sync_strm": self._once_full_sync_strm,
-            "passport": self._passport,
-            "password": self._password,
-            "moviepilot_address": self.moviepilot_address,
-            "user_rmt_mediaext": self._user_rmt_mediaext,
-            "user_download_mediaext": self._user_download_mediaext,
-            "transfer_monitor_enabled": self._transfer_monitor_enabled,
-            "transfer_monitor_paths": self._transfer_monitor_paths,
-            "transfer_monitor_scrape_metadata_enabled": self._transfer_monitor_scrape_metadata_enabled,
-            "transfer_mp_mediaserver_paths": self._transfer_mp_mediaserver_paths,
-            "transfer_monitor_media_server_refresh_enabled": self._transfer_monitor_media_server_refresh_enabled,
-            "transfer_monitor_mediaservers": self._transfer_monitor_mediaservers,
-            "timing_full_sync_strm": self._timing_full_sync_strm,
-            "full_sync_auto_download_mediainfo_enabled": self._full_sync_auto_download_mediainfo_enabled,
-            "cron_full_sync_strm": self._cron_full_sync_strm,
-            "full_sync_strm_paths": self._full_sync_strm_paths,
-            "share_strm_enabled": self._share_strm_enabled,
-            "share_strm_auto_download_mediainfo_enabled": self._share_strm_auto_download_mediainfo_enabled,
-            "user_share_code": self._user_share_code,
-            "user_share_pwd": self._user_share_pwd,
-            "user_share_pan_path": self._user_share_pan_path,
-            "user_share_local_path": self._user_share_local_path,
-            "clear_recyclebin_enabled": self._clear_recyclebin_enabled,
-            "clear_receive_path_enabled": self._clear_receive_path_enabled,
-            "cron_clear": self._cron_clear,
-            "account_pool": self._account_pool_raw,
-        })
+        self.update_config(
+            {
+                "enabled": self._enabled,
+                "once_full_sync_strm": self._once_full_sync_strm,
+                "passport": self._passport,
+                "password": self._password,
+                "moviepilot_address": self.moviepilot_address,
+                "user_rmt_mediaext": self._user_rmt_mediaext,
+                "user_download_mediaext": self._user_download_mediaext,
+                "transfer_monitor_enabled": self._transfer_monitor_enabled,
+                "transfer_monitor_paths": self._transfer_monitor_paths,
+                "transfer_monitor_scrape_metadata_enabled": self._transfer_monitor_scrape_metadata_enabled,
+                "transfer_mp_mediaserver_paths": self._transfer_mp_mediaserver_paths,
+                "transfer_monitor_media_server_refresh_enabled": self._transfer_monitor_media_server_refresh_enabled,
+                "transfer_monitor_mediaservers": self._transfer_monitor_mediaservers,
+                "timing_full_sync_strm": self._timing_full_sync_strm,
+                "full_sync_auto_download_mediainfo_enabled": self._full_sync_auto_download_mediainfo_enabled,
+                "cron_full_sync_strm": self._cron_full_sync_strm,
+                "full_sync_strm_paths": self._full_sync_strm_paths,
+                "share_strm_enabled": self._share_strm_enabled,
+                "share_strm_auto_download_mediainfo_enabled": self._share_strm_auto_download_mediainfo_enabled,
+                "user_share_code": self._user_share_code,
+                "user_share_pwd": self._user_share_pwd,
+                "user_share_pan_path": self._user_share_pan_path,
+                "user_share_local_path": self._user_share_local_path,
+                "clear_recyclebin_enabled": self._clear_recyclebin_enabled,
+                "clear_receive_path_enabled": self._clear_receive_path_enabled,
+                "cron_clear": self._cron_clear,
+            }
+        )
 
     @staticmethod
     def has_prefix(full_path, prefix_path):
@@ -1339,7 +1719,7 @@ class P123StrmHelper(_PluginBase):
 
         try:
             _storagechain = StorageChain()
-            _mediainfodownloader = MediaInfoDownloader(client=self._client, plugin_ref=self)
+            _mediainfodownloader = MediaInfoDownloader(client=self._client)
 
             if subtitle_list:
                 logger.info("【监控整理STRM生成】开始下载字幕文件")
@@ -1565,18 +1945,3 @@ class P123StrmHelper(_PluginBase):
                 self._scheduler = None
         except Exception as e:
             print(str(e))
-
-    def api_rotate_account(self, request: Request):
-        """
-        手动切换账号池账号API
-        """
-        self.rotate_account()
-        return JSONResponse({"state": True, "message": "账号已切换"})
-
-    def clean_logs(self):
-        try:
-            # 这里可以根据实际日志路径进行清理，如删除日志文件或只输出提示
-            # 示例：仅输出日志清理提示
-            logger.info("【日志清理】每天0点定时清理日志（请根据实际需求实现日志文件删除）")
-        except Exception as e:
-            logger.error(f"【日志清理】清理日志时出错: {e}")
