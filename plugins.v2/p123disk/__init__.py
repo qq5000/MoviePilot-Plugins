@@ -1,4 +1,3 @@
-import random
 from pathlib import Path
 from typing import Any, List, Dict, Tuple, Optional
 
@@ -12,7 +11,6 @@ from app.plugins import _PluginBase
 from app.schemas.types import ChainEventType
 from app.helper.storage import StorageHelper
 from schemas import StorageOperSelectionEventData, FileItem
-from fastapi import Request
 
 
 class P123AutoClient:
@@ -105,13 +103,6 @@ class P123Disk(_PluginBase):
             self._passport = config.get("passport")
             self._password = config.get("password")
 
-            # 启动前自动清理缓存
-            if self._enabled:
-                try:
-                    self.clear_cache()
-                except Exception as e:
-                    logger.error(f"【123云盘】启动前清理缓存失败: {e}")
-
             try:
                 self._client = P123AutoClient(self._passport, self._password)
                 self._p123_api = P123Api(client=self._client, disk_name=self._disk_name)
@@ -126,15 +117,7 @@ class P123Disk(_PluginBase):
         pass
 
     def get_api(self) -> List[Dict[str, Any]]:
-        return [
-            {
-                "path": "/clear_cache",
-                "endpoint": self.api_clear_cache,
-                "methods": ["GET"],
-                "summary": "清除缓存",
-                "description": "清除123云盘缓存数据",
-            }
-        ]
+        pass
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
@@ -404,11 +387,10 @@ class P123Disk(_PluginBase):
             """
             递归获取文件信息
             """
-            if _fileitm and _fileitm.type == "dir":
+            if _fileitm.type == "dir":
                 for sub_file in self._p123_api.list(_fileitm):
-                    if sub_file:
-                        __snapshot_file(sub_file)
-            elif _fileitm:
+                    __snapshot_file(sub_file)
+            else:
                 files_info[_fileitm.path] = _fileitm.size
 
         fileitem = self._p123_api.get_item(path)
@@ -436,29 +418,6 @@ class P123Disk(_PluginBase):
             return None
 
         return {"move": "移动", "copy": "复制"}
-
-    def clear_cache(self) -> bool:
-        """
-        清除项目数据缓存
-        """
-        try:
-            if self._p123_api:
-                self._p123_api.clear_cache()
-                logger.info("【123云盘】缓存已清除")
-                return True
-        except Exception as e:
-            logger.error(f"【123云盘】清除缓存失败: {e}")
-        return False
-
-    def api_clear_cache(self, request: Request):
-        """
-        清除项目数据缓存API
-        """
-        result = self.clear_cache()
-        if result:
-            return JSONResponse({"state": True, "message": "缓存已清除"})
-        else:
-            return JSONResponse({"state": False, "message": "清除缓存失败"})
 
     def stop_service(self):
         """

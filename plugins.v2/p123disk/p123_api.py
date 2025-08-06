@@ -25,12 +25,6 @@ class P123Api:
         self.client = client
         self._disk_name = disk_name
 
-    def clear_cache(self):
-        """
-        清除路径缓存
-        """
-        self._id_cache.clear()
-
     def _path_to_id(self, path: str):
         """
         通过路径获取ID
@@ -99,8 +93,6 @@ class P123Api:
         """
         浏览文件
         """
-        if not fileitem:
-            return []
         if fileitem.type == "file":
             item = self.detail(fileitem)
             if item:
@@ -177,8 +169,6 @@ class P123Api:
         :param fileitem: 父目录
         :param name: 目录名
         """
-        if not fileitem or not fileitem.path:
-            return None
         try:
             new_path = Path(fileitem.path) / name
             resp = self.client.fs_mkdir(name, parent_id=self._path_to_id(fileitem.path))
@@ -212,11 +202,7 @@ class P123Api:
             """
             查找下级目录中匹配名称的目录
             """
-            if not _fileitem:
-                return None
             for sub_folder in self.list(_fileitem):
-                if not sub_folder:
-                    continue
                 if sub_folder.type != "dir":
                     continue
                 if sub_folder.name == _name:
@@ -282,8 +268,6 @@ class P123Api:
         删除文件
         此操作将保留回收站文件
         """
-        if not fileitem or not fileitem.fileid:
-            return False
         try:
             resp = self.client.fs_trash(int(fileitem.fileid), event="intoRecycle")
             check_response(resp)
@@ -296,8 +280,6 @@ class P123Api:
         """
         重命名文件
         """
-        if not fileitem or not fileitem.fileid:
-            return False
         try:
             payload = {
                 "FileId": int(fileitem.fileid),
@@ -317,15 +299,13 @@ class P123Api:
         :param fileitem: 文件项
         :param path: 文件保存路径
         """
-        if not fileitem or not fileitem.pickcode or not fileitem.fileid or not fileitem.name:
-            return None
+        json_obj = ast.literal_eval(fileitem.pickcode)
+        s3keyflag = json_obj["S3KeyFlag"]
+        file_id = fileitem.fileid
+        file_name = fileitem.name
+        md5 = json_obj["Etag"]
+        size = json_obj["Size"]
         try:
-            json_obj = ast.literal_eval(fileitem.pickcode)
-            s3keyflag = json_obj["S3KeyFlag"]
-            file_id = fileitem.fileid
-            file_name = fileitem.name
-            md5 = json_obj["Etag"]
-            size = json_obj["Size"]
             payload = {
                 "Etag": md5,
                 "FileID": int(file_id),
@@ -358,8 +338,6 @@ class P123Api:
         :param local_path: 本地文件路径
         :param new_name: 上传后文件名
         """
-        if not target_dir or not target_dir.fileid:
-            return None
         target_name = new_name or local_path.name
         target_path = Path(target_dir.path) / target_name
         try:

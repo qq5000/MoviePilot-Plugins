@@ -571,13 +571,6 @@ class P123StrmHelper(_PluginBase):
                 passport_masked = f"{passport_masked[:3]}****{passport_masked[-4:]}"
             logger.info(f"【账号池】账号初始化：当前索引 1/{len(self._account_pool)}，账号：{passport_masked}")
 
-        # 启动前自动清理缓存
-        if self._enabled:
-            try:
-                self.clear_cache()
-            except Exception as e:
-                logger.error(f"【123云盘STRM助手】启动前清理缓存失败: {e}")
-
         try:
             self._client = P123AutoClient(self._passport, self._password)
         except Exception as e:
@@ -742,13 +735,6 @@ class P123StrmHelper(_PluginBase):
                 "methods": ["POST"],
                 "summary": "手动切换账号池账号",
                 "description": "手动切换账号池账号，切换后自动重建client。",
-            },
-            {
-                "path": "/clear_cache",
-                "endpoint": self.api_clear_cache,
-                "methods": ["GET"],
-                "summary": "清除缓存",
-                "description": "清除项目数据缓存",
             },
         ]
 
@@ -1584,45 +1570,6 @@ class P123StrmHelper(_PluginBase):
         """
         self.rotate_account()
         return JSONResponse({"state": True, "message": "账号已切换"})
-
-    def api_clear_cache(self, request: Request):
-        """
-        清除项目数据缓存API
-        """
-        result = self.clear_cache()
-        if result:
-            return JSONResponse({"state": True, "message": "缓存已清除"})
-        else:
-            return JSONResponse({"state": False, "message": "清除缓存失败"})
-
-    def clear_cache(self) -> bool:
-        """
-        清除项目数据缓存
-        """
-        try:
-            # 清除账号池相关缓存
-            self._account_pool = []
-            self._current_account_index = 0
-            self._account_pool_last_len = 0
-            
-            # 清除客户端实例
-            self._client = None
-            
-            # 重新初始化客户端
-            if self._passport and self._password:
-                try:
-                    self._client = P123AutoClient(self._passport, self._password)
-                    logger.info("【123云盘STRM助手】缓存已清除，客户端已重新初始化")
-                    return True
-                except Exception as e:
-                    logger.error(f"【123云盘STRM助手】重新初始化客户端失败: {e}")
-            else:
-                logger.info("【123云盘STRM助手】缓存已清除")
-                return True
-                
-        except Exception as e:
-            logger.error(f"【123云盘STRM助手】清除缓存失败: {e}")
-        return False
 
     def clean_logs(self):
         try:
