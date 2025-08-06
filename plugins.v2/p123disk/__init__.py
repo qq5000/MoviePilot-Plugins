@@ -104,6 +104,13 @@ class P123Disk(_PluginBase):
             self._passport = config.get("passport")
             self._password = config.get("password")
 
+            # 启动前自动清理缓存
+            if self._enabled:
+                try:
+                    self.clear_cache()
+                except Exception as e:
+                    logger.error(f"【123云盘】启动前清理缓存失败: {e}")
+
             try:
                 self._client = P123AutoClient(self._passport, self._password)
                 self._p123_api = P123Api(client=self._client, disk_name=self._disk_name)

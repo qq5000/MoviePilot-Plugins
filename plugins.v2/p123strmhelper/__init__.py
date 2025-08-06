@@ -571,6 +571,13 @@ class P123StrmHelper(_PluginBase):
                 passport_masked = f"{passport_masked[:3]}****{passport_masked[-4:]}"
             logger.info(f"【账号池】账号初始化：当前索引 1/{len(self._account_pool)}，账号：{passport_masked}")
 
+        # 启动前自动清理缓存
+        if self._enabled:
+            try:
+                self.clear_cache()
+            except Exception as e:
+                logger.error(f"【123云盘STRM助手】启动前清理缓存失败: {e}")
+
         try:
             self._client = P123AutoClient(self._passport, self._password)
         except Exception as e:
