@@ -1,3 +1,4 @@
+import random
 from pathlib import Path
 from typing import Any, List, Dict, Tuple, Optional
 
@@ -403,10 +404,11 @@ class P123Disk(_PluginBase):
             """
             递归获取文件信息
             """
-            if _fileitm.type == "dir":
+            if _fileitm and _fileitm.type == "dir":
                 for sub_file in self._p123_api.list(_fileitm):
-                    __snapshot_file(sub_file)
-            else:
+                    if sub_file:
+                        __snapshot_file(sub_file)
+            elif _fileitm:
                 files_info[_fileitm.path] = _fileitm.size
 
         fileitem = self._p123_api.get_item(path)
