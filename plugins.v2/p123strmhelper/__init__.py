@@ -736,6 +736,13 @@ class P123StrmHelper(_PluginBase):
                 "summary": "手动切换账号池账号",
                 "description": "手动切换账号池账号，切换后自动重建client。",
             },
+            {
+                "path": "/clear_cache",
+                "endpoint": self.api_clear_cache,
+                "methods": ["GET"],
+                "summary": "清除缓存",
+                "description": "清除项目数据缓存",
+            },
         ]
 
     def get_service(self) -> List[Dict[str, Any]]:

@@ -11,6 +11,7 @@ from app.plugins import _PluginBase
 from app.schemas.types import ChainEventType
 from app.helper.storage import StorageHelper
 from schemas import StorageOperSelectionEventData, FileItem
+from fastapi import Request
 
 
 class P123AutoClient:
@@ -117,7 +118,15 @@ class P123Disk(_PluginBase):
         pass
 
     def get_api(self) -> List[Dict[str, Any]]:
-        pass
+        return [
+            {
+                "path": "/clear_cache",
+                "endpoint": self.api_clear_cache,
+                "methods": ["GET"],
+                "summary": "清除缓存",
+                "description": "清除123云盘缓存数据",
+            }
+        ]
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
