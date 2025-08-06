@@ -25,6 +25,12 @@ class P123Api:
         self.client = client
         self._disk_name = disk_name
 
+    def clear_cache(self):
+        """
+        清除路径缓存
+        """
+        self._id_cache.clear()
+
     def _path_to_id(self, path: str):
         """
         通过路径获取ID

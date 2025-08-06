@@ -419,6 +419,29 @@ class P123Disk(_PluginBase):
 
         return {"move": "移动", "copy": "复制"}
 
+    def clear_cache(self) -> bool:
+        """
+        清除项目数据缓存
+        """
+        try:
+            if self._p123_api:
+                self._p123_api.clear_cache()
+                logger.info("【123云盘】缓存已清除")
+                return True
+        except Exception as e:
+            logger.error(f"【123云盘】清除缓存失败: {e}")
+        return False
+
+    def api_clear_cache(self, request: Request):
+        """
+        清除项目数据缓存API
+        """
+        result = self.clear_cache()
+        if result:
+            return JSONResponse({"state": True, "message": "缓存已清除"})
+        else:
+            return JSONResponse({"state": False, "message": "清除缓存失败"})
+
     def stop_service(self):
         """
         退出插件
