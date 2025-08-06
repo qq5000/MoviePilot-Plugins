@@ -546,7 +546,13 @@ class P123StrmHelper(_PluginBase):
             for line in self._account_pool_raw.strip().splitlines():
                 if "#" in line:
                     passport, password = line.split("#", 1)
-                    self._account_pool.append({"passport": passport.strip(), "password": password.strip()})
+                    passport = str(passport).strip()
+                    password = str(password).strip()
+                    # 验证手机号码格式
+                    if not passport.isdigit() or len(passport) != 11:
+                        logger.warning(f"【账号池】跳过无效的手机号码格式: {repr(passport)}")
+                        continue
+                    self._account_pool.append({"passport": passport, "password": password})
             self._account_pool_last_len = len(self._account_pool)
             if not self._user_rmt_mediaext:
                 self._user_rmt_mediaext = "mp4,mkv,ts,iso,rmvb,avi,mov,mpeg,mpg,wmv,3gp,asf,m4v,flv,m2ts,tp,f4v"
@@ -564,17 +570,29 @@ class P123StrmHelper(_PluginBase):
         if self._account_pool:
             self._current_account_index = 0
             account = self._account_pool[self._current_account_index]
-            self._passport = account.get("passport", "")
-            self._password = account.get("password", "")
+            self._passport = str(account.get("passport", "")).strip()
+            self._password = str(account.get("password", "")).strip()
             passport_masked = self._passport
             if len(passport_masked) >= 7:
                 passport_masked = f"{passport_masked[:3]}****{passport_masked[-4:]}"
             logger.info(f"【账号池】账号初始化：当前索引 1/{len(self._account_pool)}，账号：{passport_masked}")
+        else:
+            # 单账号模式，验证格式
+            self._passport = str(self._passport).strip()
+            self._password = str(self._password).strip()
+            if self._passport and (not self._passport.isdigit() or len(self._passport) != 11):
+                logger.error(f"【单账号】手机号码格式不正确: {repr(self._passport)}，应为11位纯数字")
+                self._enabled = False
 
         try:
+            passport_debug = str(self._passport).strip()
+            logger.info(f"【调试】正在创建123云盘客户端，手机号码长度: {len(passport_debug)}, 格式验证: {passport_debug.isdigit()}")
+            logger.info(f"【调试】手机号码: {passport_debug[:3]}****{passport_debug[-4:] if len(passport_debug) >= 7 else '***'}")
             self._client = P123AutoClient(self._passport, self._password)
+            logger.info("【调试】123云盘客户端创建成功")
         except Exception as e:
             logger.error(f"123云盘客户端创建失败: {e}")
+            logger.error(f"【调试】创建失败时的原始手机号码: {repr(self._passport)}")
 
         self.stop_service()
 
@@ -650,10 +668,13 @@ class P123StrmHelper(_PluginBase):
             passport_masked = f"{passport_masked[:3]}****{passport_masked[-4:]}"
         logger.info(f"【账号池】账号轮换：切换到 {self._current_account_index+1}/{len(self._account_pool)}（{passport_masked}）")
         try:
+            passport_debug = str(self._passport).strip()
+            logger.info(f"【账号池调试】切换账号，手机号码长度: {len(passport_debug)}, 格式验证: {passport_debug.isdigit()}")
             self._client = P123AutoClient(self._passport, self._password)
             logger.info(f"【账号池】已切换账号并重建 client：{passport_masked}")
         except Exception as e:
             logger.error(f"【账号池】切换账号时重建 client 失败: {e}")
+            logger.error(f"【账号池调试】创建失败时的原始手机号码: {repr(self._passport)}")
         self.__update_config()
 
     def log_rotate_countdown(self):
@@ -1185,6 +1206,8 @@ class P123StrmHelper(_PluginBase):
                 )
             except Exception as e:
                 logger.error(f"【302跳转服务】转存 {name} 文件失败: {e}")
+                logger.error(f"【302跳转调试】转存失败参数: md5={md5}, size={size}, name={name}")
+                logger.error(f"【302跳转调试】当前账号: {repr(self._passport)}")
                 return JSONResponse(
                     {"state": False, "message": f"转存 {name} 文件失败: {e}"}, 500
                 )
