@@ -1,1 +1,2 @@
 p123client==0.0.8.8
+python-cookietools==0.0.8
