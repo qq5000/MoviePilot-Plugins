@@ -49,7 +49,7 @@ class P123AutoClient:
 
 class P123Disk(_PluginBase):
     # 插件名称
-    plugin_name = "123云盘储存"
+    plugin_name = "123云盘储存2"
     # 插件描述
     plugin_desc = "使存储支持123云盘。"
     # 插件图标
