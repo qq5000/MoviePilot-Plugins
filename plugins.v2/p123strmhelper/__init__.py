@@ -51,15 +51,24 @@ class MediaInfoDownloader:
 
     def get_download_url_with_retry(self, item: Dict, max_retry: int = None):
         """
-        获取下载链接，失败则自动轮换账号池重试
+        获取下载链接，失败则自动轮换账号池重试，直到成功获取下载地址或尝试完所有账号
+        成功获取下载地址后，保持使用当前账号直到下一次轮换
         """
         plugin = self.plugin_ref
         if plugin and hasattr(plugin, '_account_pool') and plugin._account_pool:
             pool_len = len(plugin._account_pool)
         else:
             pool_len = 1
-        if max_retry is None:
+        
+        # 设置最大重试次数为账号池长度，确保尝试所有可用账号
+        if max_retry is None or max_retry > pool_len:
             max_retry = pool_len
+        
+        # 记录初始账号索引，仅用于所有账号尝试失败后恢复
+        initial_index = None
+        if plugin and hasattr(plugin, '_current_account_index'):
+            initial_index = plugin._current_account_index
+        
         for attempt in range(max_retry):
             try:
                 resp = self.client.download_info(
@@ -69,16 +78,31 @@ class MediaInfoDownloader:
                 )
                 check_response(resp)
                 logger.info(f"【账号池】账号{plugin._passport if plugin else ''}获取下载地址成功")
+                # 成功获取下载地址后，保持使用当前账号，不恢复到初始账号
+                logger.info(f"【账号池】成功获取下载地址，保持使用当前账号直到下一次轮换")
                 return resp.get("data", {}).get("DownloadUrl", None)
             except Exception as e:
                 logger.warning(f"【账号池】账号{plugin._passport if plugin else ''}获取下载地址失败: {e}")
-                if plugin and plugin._account_pool and max_retry > 1:
-                    logger.info("【账号池】尝试轮换账号池账号后重试")
+                # 如果还有账号可尝试，轮换账号继续
+                if plugin and plugin._account_pool and attempt < max_retry - 1:
+                    logger.info(f"【账号池】尝试轮换到下一个账号 ({attempt + 2}/{max_retry}) 后重试")
                     plugin.rotate_account()
                     self.client = plugin._client  # 更新client
                 else:
                     break
-        logger.error("【账号池】所有账号均尝试失败，无法获取下载地址")
+        
+        # 所有账号尝试失败后恢复到初始账号
+        if initial_index is not None and hasattr(plugin, '_current_account_index') and \
+           plugin._current_account_index != initial_index:
+            logger.info(f"【账号池】所有账号尝试失败，恢复到初始账号")
+            plugin._current_account_index = initial_index
+            account = plugin._account_pool[plugin._current_account_index]
+            plugin._passport = account.get("passport", "")
+            plugin._password = account.get("password", "")
+            plugin._client = P123AutoClient(plugin._passport, plugin._password)
+            self.client = plugin._client
+            
+        logger.error(f"【账号池】所有 {max_retry} 个账号均尝试失败，无法获取下载地址")
         return None
 
     def get_download_url(self, item: Dict):
@@ -451,7 +475,7 @@ class P123StrmHelper(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDS-Derek/MoviePilot-Plugins/main/icons/P123Disk.png"
     # 插件版本
-    plugin_version = "9.9.9"
+    plugin_version = "10.9.9"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
