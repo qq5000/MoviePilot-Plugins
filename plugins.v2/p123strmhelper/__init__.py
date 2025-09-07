@@ -475,7 +475,7 @@ class P123StrmHelper(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/DDS-Derek/MoviePilot-Plugins/main/icons/P123Disk.png"
     # 插件版本
-    plugin_version = "10.9.9"
+    plugin_version = "11.9.9"
     # 插件作者
     plugin_author = "DDSRem"
     # 作者主页
@@ -1233,6 +1233,29 @@ class P123StrmHelper(_PluginBase):
             logger.info(f"【302跳转服务】获取 123 下载地址成功: {url}")
         except Exception as e:
             logger.error(f"【302跳转服务】获取 123 下载地址失败: {e}")
+            # 检测到获取下载地址失败，尝试切换账号后重试
+            if self._account_pool and len(self._account_pool) > 1:
+                logger.info(f"【302跳转服务】检测到获取下载地址失败，尝试切换到下一个账号")
+                self.rotate_account()
+                try:
+                    # 切换账号后重试获取下载地址
+                    resp = self._client.download_info(
+                        payload,
+                        base_url="",
+                        headers={"User-Agent": user_agent},
+                    )
+                    check_response(resp)
+                    url = resp["data"]["DownloadUrl"]
+                    logger.info(f"【302跳转服务】切换账号后获取 123 下载地址成功: {url}")
+                except Exception as retry_error:
+                    logger.error(f"【302跳转服务】切换账号后获取 123 下载地址仍然失败: {retry_error}")
+                    return JSONResponse(
+                        {"state": False, "message": f"获取 {name} 下载地址失败: {retry_error}"}, 500
+                    )
+            else:
+                return JSONResponse(
+                    {"state": False, "message": f"获取 {name} 下载地址失败: {e}"}, 500
+                )
 
         return RedirectResponse(url, 302)
 
